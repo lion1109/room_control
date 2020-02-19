@@ -1,4 +1,5 @@
-# RoomControl
+[//]: # (file: "~/Privat/R3P/room_tech/README.md")
+# RoomTech
 This software is controlling 16 motors. 8 are used to open/close windows and 8 are used to raise and lower the window blinds. The neutral position is a closed not blinded window.
 
 
@@ -54,11 +55,23 @@ The shift registers can be powered by 2~6 volt. For this project we use the 5V V
 
 [Jakob]
 
+
 ### Microcomputer as controler and UserInterface
 
 A Raspberry Pi microcomputer is used to control the motor controller relay shift registers by the GPIO 
 
 [Jakob]
+
+
+### Light dimmer hardware
+
+First idea: Arduino PWM controlled [dimmer](https://www.instructables.com/id/AC-PWM-Dimmer-for-Arduino/). 
+But the Lights need to have a fallback dimmer.
+
+[Jakob]
+
+Arduino Software and serial interface to the UI [Eduard]
+
 
 ### Tablet as UserInterface device
 
