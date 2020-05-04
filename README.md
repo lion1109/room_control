@@ -65,8 +65,13 @@ A Raspberry Pi microcomputer is used to control the motor controller relay shift
 
 ### Light dimmer hardware
 
-First idea: Arduino PWM controlled [dimmer](https://www.instructables.com/id/AC-PWM-Dimmer-for-Arduino/). 
-But the Lights need to have a fallback dimmer.
+First idea: Arduino PWM controlled [dimmer1](https://www.instructables.com/id/AC-PWM-Dimmer-for-Arduino/) or [dimmer2](http://www.inmojo.com/store/inmojo-market/item/digital-ac-dimmer-module-lite-v.2/).
+
+Alternate Hardware: [sonoff](https://sonoff.tech/product/wifi-diy-smart-switches/4ch-r2-pro-r2).
+
+Hardware Explained: [video1](https://www.youtube.com/watch?v=XdCvJ1wZ0bA) and [here](https://electronics.stackexchange.com/questions/339185/modify-pwm-controlled-230v-incandescent-bulb-dimmer-circuit).
+
+But the lights may have a fallback dimmer.
 
 [Jakob]
 
