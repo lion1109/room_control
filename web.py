@@ -144,8 +144,7 @@ class Room:
 
     def pushEvent(self,event):
         self.eventLock.acquire()
-        lock.acquire()
-        self.events.list_append(event)
+        self.events.append(event)
         self.eventLock.release()
 
     
@@ -174,12 +173,12 @@ class Room:
 
     
     def serve_forever(self):
+        i = 0
         while True:
             self.handleEvents()
-                
-            print('room thread')
-            time.sleep(3)
-            # todo
+            i += 0   
+            if not ( i % 10 ): print('room thread')
+            time.sleep(0.5)
 
         
     def getWindows(self):
@@ -252,6 +251,7 @@ class RequestHandler(BaseHTTPRequestHandler):
         parsed_path = self.get_parsed_path()
         path = parsed_path['path']
         print( "parsed_path: "+str(parsed_path))
+        if '/' == path: path = '/index.html'
         if '/request/static.txt' == path:
             room = self.server.room
             data = { 'base': room.getState('static',None) }
@@ -260,8 +260,20 @@ class RequestHandler(BaseHTTPRequestHandler):
             room = self.server.room
             data = { 'base': room.getState('window_config',{'id':self.parameter_value('id')}) }
             content = str(data)
+        elif '/request/window' == path:
+            room = self.server.room
+            data = {}
+            action = int(self.parameter_value('action',0))
+            if action > 0 and action <= 6:
+                args = { 'id': self.parameter_value('id') }
+                room.pushEvent( Event('action',args) )
+                data['result'] = 0
+            else:
+                data['result'] = 1
+                data['error' ] = "unknown action: '{}'".format(action)
+            content = str(data)
         elif '/' == path:
-            content = '<html><head><title>Room Control</title></head><body>Hello World</body></html>'
+            content = '<html><head><meta http-equiv="Content-Type" content="text/html; charset=utf-8"/><title>Room Control</title></head><body>Room Control</body></html>'
         elif '/test.txt' == path:
             content  = 'Hello, world!\n\n'
             content += 'requestline:      '+self.requestline     +'\n'
@@ -274,20 +286,22 @@ class RequestHandler(BaseHTTPRequestHandler):
             content += "parameter_values('v'): "+str(self.parameter_values('v'))+'\n'
         else:
             full_path = self.server.base_dir+'/web'+path
-            file = open(full_path)
+            file = open(full_path, 'rb')
             if file is None:
                 status  = 404
                 content = "unknown request: GET '"+self.path+"', '"+str(full_path)+"' is not readable"
             else:
-                content = '';
-                line = file.read()
-                while len(line): # is not None:
-                    content += line
-                    line = file.read()
+                encoding  = None
+                chunksize = 4096
+                content   = bytearray(b'')
+                chunk = file.read(chunksize)
+                while len(chunk):
+                    content += chunk
+                    chunk = file.read(chunksize)
 
         self.send_response(status)
         self.end_headers()
-        self.wfile.write(bytes(content,encoding))
+        self.wfile.write( bytes(content,encoding) if encoding else content )
 
         
     def do_POST(self):
