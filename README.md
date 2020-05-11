@@ -110,11 +110,18 @@ The position controler offers a set of commands to request and set the motor pos
 
 ### Web Application
 
-#### Design [Holger]
 
+#### HTML/SVG realization [Eduard]
 
-#### HTML realization [Eduard]
+### Installation
 
+- Install a Raspberry Pi
+- Create a user eg. 'feg'
+- Instal packages: git python
+- Grant git access to user
+- Get Code: git clone git@github.com:lion1109/room_control.git
+- Call: /home/feg/room_control start
+- For permanent installation insert '/home/feg/room_control start' into /etc/rc.local or into users crontab for reboot
 
 
 ## Time line and responsibilities
