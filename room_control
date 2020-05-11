@@ -1,0 +1,82 @@
+#!/bin/bash
+
+baseDir="${0%%/*}"
+if [[ "$baseDir" != /* ]]; then baseDir="$(pwd)/$baseDir"; fi
+baseDir="${baseDir%%/.}"
+
+
+function info () {
+  echo "command: $0"
+  echo "baseDir: $baseDir"
+}
+
+
+function genCert () {
+  local dir="$1"
+  local domain="$2"
+  local subject="${3/\$domain/$domain}"
+  pushd $dir
+  #eval 'subject="'$subject'"'
+  echo "domain='$domain'"
+  echo "subject='$subject'"
+  RANDFILE=/tmp/.rnd openssl req -nodes -newkey rsa:2048 -keyout ssl_key.pem -out ssl.csr -subj "$subject"
+  RANDFILE=/tmp/.rnd openssl x509 -in ssl.csr -out ssl_cert.pem -req -signkey ssl_key.pem -days 1001
+  popd
+}
+
+
+function initialize() {
+  env=$(mktemp)
+  $baseDir/web.py env $baseDir/config.yaml > $env
+  source $env
+  rm $env
+
+  #info
+  #cat $env
+
+  if ! [ -e $baseDir/config ]; then
+    mkdir $baseDir/config
+    mkdir $baseDir/log
+    mkdir $baseDir/web
+    if ! [ -r $baseDir/config/cert.pem ]; then
+      genCert $baseDir/config $web__domain "$web__cert_subject"
+      cat $baseDir/config/ssl_{key,cert}.pem > $web__cert_path
+    fi
+  fi
+}
+
+
+log=$baseDir/log/room_control.log
+conf=$baseDir/config.yaml
+
+function start_process () {
+  echo start_process 
+  initialize
+  if [ "$(pgrep web.py)" = "" ]; then
+    echo -e "\nnohup env PYTHONUNBUFFERED=1 $baseDir/web.py run $conf" >> $log
+    nohup env PYTHONUNBUFFERED=1 $baseDir/web.py run $conf >> $log 2>&1 &
+  fi
+}
+
+
+cmd=$1
+if [ "$cmd" = run -a "$#" = 1 ]; then
+  initialize
+  $baseDir/web.py run $conf
+elif [ "$cmd" = start -a "$#" = 1 ]; then
+  start_process
+  exit 0
+elif [ "$cmd" = stop -a "$#" = 1 ]; then
+  initialize
+  killall -s TERM web.py
+  exit 0
+elif [ "$cmd" = restart -a "$#" = 1 ]; then
+  killall -s TERM web.py
+  sleep 1
+  start_process
+  exit 0
+else
+  echo "unknown command: '$cmd' '$*'"
+  echo "call: $0 [run|start|stop|restart]"
+  exit -1
+fi
