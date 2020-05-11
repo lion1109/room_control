@@ -31,12 +31,16 @@ baseDir="${0%%/*}"
 if [[ "$baseDir" != /* ]]; then baseDir="$(pwd)/$baseDir"; fi
 baseDir="${baseDir%%/.}"
 
+
 env=$(mktemp)
 $baseDir/web.py env $baseDir/config.yaml > $env
 source $env
+rm $env
+
 
 info
-cat $env
+#cat $env
+
 
 if ! [ -e $baseDir/config ]; then
   mkdir $baseDir/config
@@ -46,6 +50,7 @@ if ! [ -e $baseDir/config ]; then
     genCert $baseDir/config $web__domain "$web__cert_subject"
     cat $baseDir/config/ssl_{key,cert}.pem > $web__cert_path
   fi
-
 fi
 
+
+$baseDir/web.py run $baseDir/config.yaml

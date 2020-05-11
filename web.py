@@ -176,7 +176,7 @@ class Room:
         i = 0
         while True:
             self.handleEvents()
-            i += 0   
+            i += 1
             if not ( i % 10 ): print('room thread')
             time.sleep(0.5)
 
@@ -342,7 +342,12 @@ class ProjectServer ( HTTPServer ):
         if cert_path is not None:
             if cert_path[0] != '/':
                 cert_path = self.base_dir + '/' + cert_path
-            self.socket = ssl.wrap_socket( self.socket, certfile=cert_path, server_side=True)
+            # using a SSLContext
+            context = ssl.create_default_context(purpose=ssl.Purpose.CLIENT_AUTH, cafile=None, capath=None, cadata=None)
+            context.load_cert_chain(cert_path)
+            self.socket = context.wrap_socket( self.socket, server_side=True )
+            # deprecated without SSLContext
+            #self.socket = ssl.wrap_socket( self.socket, certfile=cert_path, server_side=True)
 
             
     def set_room (self,room):
