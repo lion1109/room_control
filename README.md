@@ -78,12 +78,11 @@ But the lights may have a fallback dimmer.
 Arduino Software and serial interface to the UI [Eduard]
 
 
-### Tablet as UserInterface device
+### Touchscreen as UserInterface device
 
-A tablet running a firefox browser in kiosk mode.
-
-[Holger]
-
+A Touchscreen device and a Chromium browser in kiosk mode can be used as user interface
+Infos about [kiosk](https://pimylifeup.com/raspberry-pi-kiosk/)
+or [here](https://die-antwort.eu/techblog/2017-12-setup-raspberry-pi-for-kiosk-mode/).
 
 
 ## Software
@@ -110,17 +109,34 @@ The position controler offers a set of commands to request and set the motor pos
 
 ### Web Application
 
+The UI-Web interface is realized by an interactive sgv. 
 
-#### HTML/SVG realization [Eduard]
+
+### Web API
+
+The Web API consists of a collection of URIs to handle the communication between the browser svg application and the room_control server.
+The Returned document can be a file (svg,favicon,font,htmlpage,image,...) or a json data object
+<table border="1">
+<tr><th>URI</th><th>Result</th><tr>
+<tr><td>/</td><td>alternate for: /index.html</td></tr>
+<tr><td>/index.html</td><td>type: html<br/>path: web/index.html</td></tr>
+<tr><td>/ui-0.svg</td><td>type: svg<br/>path: web/ui-0.svg</td></tr>
+<tr><td>/request/config.json</td><td>type: json<br/>parameters: none<br/>result: all configuration parameters of the room</td></tr>
+<tr><td>/request/window.json</td><td>type: json<br/>parameters:<br/>* id: string, window id e.g. 'R1'
+<br/>* action: int 0 = none, 1 = button press on 'close', ...</td></tr>
+<tr><td>/request/sr-state.json</td><td>type: json<br/>parameters: none<br/>result: the shift register state</td></tr>
+</table>
 
 ### Installation
 
 - Install a Raspberry Pi
 - Create a user eg. 'feg'
-- Instal packages: git python
+- Instal packages: git python3 python3-yaml
 - Grant git access to user
 - Get Code: git clone git@github.com:lion1109/room_control.git
-- Call: /home/feg/room_control start
+- Insert '127.0.0.1 room.local' into /etc/hosts
+- Install ssl_cert.pem in /usr/local/share/ca-certificates and call: update-ca-certificates
+- Call: /home/$user/room_control start
 - For permanent installation insert '/home/feg/room_control start' into /etc/rc.local or into users crontab for reboot
 
 

@@ -33,6 +33,13 @@
     rect.BarDynamic { fill:rgb(204,102,255); stroke:rgb(52,101,164); }
     path.BarMarker  { fill:rgb(112,153,204); stroke:rgb(52,101,164); }
 
+    circle.LED      { fill:rgb(183,214,255); stroke:rgb(52,101,164); }
+    rect.LED        { fill:rgb(183,214,255); stroke:rgb(52,101,164); }
+    text.LED        { font-family:"Liberation Sans embedded"; font-size:450px; font-weight:400; }
+
+    rect.Text       { fill:rgb(183,214,255); stroke:rgb(52,101,164); }
+    text.DbgOut     { font-family:"Liberation Sans embedded"; font-size:500px; font-weight:400; }
+
       ]]>
     </style>
 
@@ -42,49 +49,161 @@
              var debug = false;
 
              function getSubnodeById(node,id) {
-               if ( node.id == id ) {
-	         //alert( "found node having id: "+id )
+               if ( node.dataset != null && node.dataset.id == id ) {
 	         return node
 	       }
-	       //alert( "node "+node.nodeName+" id "+node.id+" type "+node.nodeType+" has "+node.childNodes.length+" children" )	 
-               var children = node.childNodes;
+	       var children = node.childNodes;
                for ( var i = 0; i < children.length; i++ ) {
 	         var child = children[i]
-	         //alert( 'look into node '+child.nodeName )
 	         var n = getSubnodeById( child, id );
 	         if ( n != null ) return n
 	       }
 	       return null
 	     }
 
-             function serverRequest(url) {
+             function serverRequest(url,hdl,data) {
 	       xmlHTTP = new XMLHttpRequest();
-	       xmlHTTP.onload = function() {
+	       xmlHTTP.onreadystatechange = function() {
 	         if (this.readyState == 4 && this.status == 200) {
-	           draw();
+	           var text = xmlHTTP.responseText;
+		   try {
+  	             var jsonObj = JSON.parse(text);
+		     if ( hdl ) hdl(jsonObj,data);
+		     if ( jsonObj.result )
+	               alert('response: '+text);
+		     else
+		       debugOutput( text );
+		   } catch(err) {
+		     alert(err+', response: '+text);
+		   }
+                   //alert("result: "+jsonObj.result);
 	         }
                };
                xmlHTTP.open("GET", url, true);
 	       xmlHTTP.send();
 	     }
 
+
+
+             function Motor(id,coord,node) {
+               this.id         = id;
+               this.coord      = coord;
+               this.node       = node;
+               this.pos_min    =   0;
+               this.pos_max    = 100;
+               this.position   =  50;
+               this.currentPos =  70;
+               this.state      =   0; // flags: 1 = pos valid, 2 = active, 4 = backward 
+	     }
+	     Motor.minPosPixel = 0;
+	     Motor.maxPosPixel = 9400 - 1100;
+	     Motor.minPos =   0;
+	     Motor.maxPos = 100;
+	     Motor.posToPixel_m = ( Motor.maxPosPixel - Motor.minPosPixel ) / ( Motor.maxPos - Motor.minPos );
+	     Motor.posToPixel_c = Motor.minPosPixel - Motor.minPos * Motor.posToPixel_m;
+	     Motor.posToPixel   = function(pos)   { return Math.floor( pos * Motor.posToPixel_m   + Motor.posToPixel_c + 0.5 ) };
+	     Motor.pixelToPos   = function(pixel) { return Math.floor( (pixel-Motor.posToPixel_c) / Motor.posToPixel_m + 0.5 ) };
+	     Motor.prototype.setPosition = function (pos) {
+	       if ( pos < Motor.minPos ) pos = Motor.minPos;
+               if ( pos > Motor.maxPos ) pos = Motor.maxPos;
+               this.position = pos;
+	       node  = getSubnodeById(this.node,'bar');
+	       pixel = Motor.posToPixel(pos);
+	       val = node[this.coord].baseVal;
+	       val.newValueSpecifiedUnits(SVGLength.SVG_LENGTHTYPE_NUMBER, pixel);
+             }
+	     Motor.prototype.setCurrentPositionAndState = function (pos,state) {
+	       if ( pos < Motor.minPos ) pos = Motor.minPos;
+               if ( pos > Motor.maxPos ) pos = Motor.maxPos;
+               this.currentPos = pos;
+	       node  = getSubnodeById(this.node,'bar_state');
+	       pixel = Motor.posToPixel(pos);
+	       trans = (this.coord=='x') ? 'translate('+pixel+',0)' : 'translate(0,'+pixel+')';
+	       //alert('c:'+node[this.coord]+', transform: '+node.getAttribute('transform')+', trans: '+trans);
+	       node.setAttribute('transform', trans);
+
+               dir = (state & 0x04) >> 2;
+	       node = getSubnodeById(this.node,'dir_'+dir);
+	       node.style = 'display:inline';
+
+               dir = 1 - dir;
+	       node = getSubnodeById(this.node,'dir_'+dir);
+	       node.style = 'display:none';
+             }
+
+
+
              function P_Window (id) {
 	       P_Window.windows[id] = this;
 	       this.id              = id;
 	       var node = document.getElementById('win_'+id);
+	       // to allow access to used tree by <use ...> tag
+	       this.init2(node.childNodes[1]) // simple access due to use-tag replaced by the template tree
 	       //alert( "window "+id+" constructed, name: "+this.NameNode );
-	     }
+               this.opener = new Motor('opener_'+id,'x',this.getSubNode('opener'));
+               this.shadow = new Motor('shadow_'+id,'y',this.getSubNode('shadow'));
+             }
 	     P_Window.windows = {};
-	     P_Window.prototype.getSubNode = function (id)   { return getSubnodeById( this.WinNode, id );   };
-	     P_Window.prototype.setName    = function (name) { this.NameNode.children[1].textContent = name };
+	     P_Window.prototype.getSubNode     = function (id)   { return getSubnodeById( this.WinNode, id );   };
+	     P_Window.prototype.setName        = function (name) { this.NameNode.children[1].textContent = name };
+	     P_Window.prototype.setOpenerState = function (state){ this.NameNode.children[1].textContent = name };
+	     P_Window.prototype.setOpenerPos   = function (pos)  { this.NameNode.children[1].textContent = name };
 
-             P_Window.prototype.serverReq  = function (url)  {
-	       serverRequest('/request/window?id='+this.id+url)
-	     }
-	     P_Window.prototype.click      = function (nr)   {
-	       this.serverReq('&action='+nr)
-	     }
-	     P_Window.prototype.init2      = function (win_node) {
+             P_Window.prototype.serverReq   = function (reqType,param,hdl)  {
+               if ( null == hdl ) hdl = P_Window.resultHandler;
+	       serverRequest('/request/window/'+reqType+'.json?win_id='+this.id+param,hdl,this);
+	     };
+	     P_Window.resultHandler = function (res,self) {
+	       if ( null == res ) {
+	         debugOutput( 'resultHandler error' );
+	       } else if ( res.result ) {
+		 debugOutput( res.toString() );
+	       } else {
+		 debugOutput( res.toString() );
+	         if ( null != res.sr_status ) {
+		   
+	         }
+	       }	 
+             };
+	     P_Window.prototype.buttonClick       = function (nr)   {
+	       if        ( 1 == nr || 2 == nr ) {
+	         var pos = nr == 1 ? 0 : 100
+	         this.serverReq('action','&action=set_position&motor=opener&pos='+pos);
+	       } else if ( 3 == nr || 4 == nr ) {
+	         var pos = nr == 3 ? 0 : 100
+	         var angle = pos;
+	         this.serverReq('action','&action=set_position&motor=blind&pos='+pos+'&angle='+angle);
+	       }
+             };
+	     P_Window.prototype.buttonClick2 = function (nr)   {
+	       //this.serverReq('&action='+nr);
+	       if ( nr == 5 || nr == 6 ) {
+	         motor = ( nr == 5 ) ? this.opener : this.shadow;
+	         pos = motor.position;
+		 motor.setPosition( motor.position + 5 );
+		 motor.setCurrentPositionAndState( motor.currentPos + 3, 3 + (motor.currentPos % 2) << 2 );
+	       }
+	     };
+	     P_Window.prototype.buttonPress = function (nr)   {
+	       if        ( 1 == nr || 2 == nr ) {
+	         var dir = nr == 1 ? 1 : 0
+	         this.serverReq('action','&action=drive_direction&motor=opener&dir='+dir);
+	       } else if ( 3 == nr || 4 == nr ) {
+	         var dir = nr == 3 ? 1 : 0
+	         this.serverReq('action','&action=drive_direction&motor=blind&dir='+dir);
+	       }
+	     };
+	     P_Window.prototype.buttonRelease = function (nr)   {
+	       if        ( 1 == nr || 2 == nr ) {
+	         var pos = nr == 1 ? 100 : 0
+	         this.serverReq('action','&action=drive_direction&motor=opener&stop=1');
+	       } else if ( 3 == nr || 4 == nr ) {
+	         var pos = nr == 3 ? 100 : 0
+	         var angle = pos;
+	         this.serverReq('action','&action=drive_direction&motor=blind&stop=1');
+	       }
+	     };
+	     P_Window.prototype.init2       = function (win_node) {
 	       this.WinNode  = win_node; win_node.P_Window = this;
 	       this.NameNode = this.getSubNode('w_name');
 	       //alert( "NameNode: "+this.NameNode );
@@ -97,69 +216,88 @@
 	     };
 
              function P_initialize (evt) {
-               if ( false ) {
-	         var eList = document.getElementsByName('text__');
-	         alert( "elements.length: "+eList.length )
-	         for ( var i = 0; i < eList.length; i++ ) {
-	           var e = eList[i];
-	           alert( "e: "+e.id );
-                   if ( e.parentNode != null && e.parentNode.id == 'w_name' ) {
-		     var win = e.parentNode.parentNode;
-		     var use = win.host;
-		     use.subtree = win;
-		     alert( "set subtree for "+use.id);
+               var eList = document.getElementsByTagName('g');
+	       //alert( "elements.length: "+eList.length )
+	       for ( var i = 0; i < eList.length; i++ ) {
+	         var e = eList[i];
+	         //alert( "e: "+e.id );
+                 if ( e.dataset.id == 'w_window' ) {
+		   var win = e;
+		   var use = win.parentNode;
+		   if ( use.id != null && use.id.substr(0,4) == 'win_' ) {
+		     var id = use.id.substr(4);
+		     //alert( "create: '"+id+"', parent: "+getNodeDetails(use));
+		     new P_Window(id);
 		   }
-	         }
-               }
-	       new P_Window('R1');
-	       new P_Window('R2');
-	       new P_Window('R3');
-	       new P_Window('R4');
-	       new P_Window('L1');
+                 }  
+               }  
 	     }
 
-	       
-	     function getUseNode(node) {
-	       var root = getRootNode(node)
-	       return root.parentNode.host;
-	     }
-	     function getRootNode(node) {
-	       if ( node.rootNode ) return node.rootNode;
-	       var succ = node;
-	       var root = null;
-	       while ( node != null ) {
-                 if ( root != null && node.parentNode == null && node.host != null ) {
-	           node.host.subtree = root;
-		   root.rootNode = root;
-		   succ.rootNode = root;
-		   return root;
+
+             P_Window.mouseEvent = function (node,nr,t) {
+	       var dt = 200; // time between down and up for a click
+	       if ( t == 1 ) { // mouse down
+	         P_Window.mouseEvent.data = { 'node': node, 'date': Date.now() };
+	         P_Window.mouseEvent.data.timeoutID = setTimeout( function () { P_Window.mouseEvent( node, nr, 2 ) }, dt );
+	       } else if ( t == 0 ) { // mouse up
+	         if ( node == P_Window.mouseEvent.data.node ) {
+		   data = P_Window.mouseEvent.data; P_Window.mouseEvent.data = null;
+		   clearTimeout(data.timeoutID);
+		   pWin = getWindow(node)
+	           if ( ! data.btnPressed ) {
+		     toggle_btn('click',1);
+		     pWin.buttonClick(nr);
+		   } else {
+		     toggle_btn('release',1);
+		     pWin.buttonRelease(nr);
+		   }
+	         }
+	       } else if ( t == 2 ) {
+	         data = P_Window.mouseEvent.data;
+	         if ( data != null && data.node == node ) {
+		   data.btnPressed = 1
+		   pWin = getWindow(node);
+		   toggle_btn('press',1);
+		   pWin.buttonPress(nr);
                  }
-		 root = node
+	       }
+             };
+
+
+	     function getUseNode(node) {
+	       var win = getWindowNode(node)
+	       return win.P_UseNode;
+	     }
+	     function getWindowNode(node) {
+	       if ( node.P_WindowNode ) return node.P_WindowNode;
+	       var sucNode = node;
+	       var winNode = null;
+	       while ( node != null ) {
+ 	         //if ( winNode != null ) { alert("winNode: "+winNode.dataset.id+', id: '+winNode.id) }
+                 //if ( winNode != null && node.parentNode == null && node.host != null ) {
+		 //  useNode = node;
+	         if ( winNode != null && winNode.dataset.id == 'w_window' ) {
+		   useNode = node;
+		   winNode.P_UseNode    = useNode;
+		   winNode.P_WindowNode = winNode;
+	           useNode.P_WindowNode = winNode;
+		   sucNode.P_WindowNode = winNode;
+		   return winNode;
+                 }
+		 winNode = node
 		 node = node.parentNode
 	       }
 	       return;
 	     }
 
 
-	     function getWindowNode(node) {
-	       var root = getRootNode(node);
-	       if ( root.P_WindowNode ) return root.P_WindowNode;
-	       if ( ! root.P_initialized ) {
-                 var id = root.parentNode.host.id.substr(4);
-		 //alert( "init subtree: "+id+" "+node.host );
-		 p_win = P_Window.initialize2(id,root)
-		 root.P_WindowNode = p_win;
-		 node.P_WindowNode = p_win;
-		 return p_win;
-	       }
-	       alert("could not find uninitilized P_Window")
-	       return null;
+	     function getWindow(node) {
+	       var winNode = getWindowNode(node);
+	       if ( winNode.P_Window ) return winNode.P_Window;
+               var id = winNode.P_UseNode.id.substr(4);
+	       winNode.P_Window = P_Window.initialize2(id,root);
+	       return winNode.P_Window;
 	     }
-
-
-             function getWindow(node) {
-               return getWindowNode(node).P_Window;
-             }
 
 
 	     function getAncesterList(node) {
@@ -181,7 +319,7 @@
 
 
              function getNodeDetails(node,obj) {
-	       var s = " [";
+	       var s = "name: "+node.nodeName+" type: "+node.nodeType+" id: "+node.id+"\n\nAttributes: [";
 	       for ( var key in node ) {
 	         if ( obj != null ) {
                    if ( node[key] == obj            ) s += "***";
@@ -197,37 +335,8 @@
 	     }
 
 
-             function button_create(obj,nr) {
-	       getWindowNode(obj);
-	       //var s = "Button wurde generiert!\n";
-     	       //s += getAncesterList(obj)
-               //alert( s );
-	     }
-
-
-	     function button_click(obj,nr) {
-	       win = getWindowNode(obj);
-	       win.click(nr);
-	       toggle_click(1);
-	       setTimeout(function(){ toggle_click(0); },300);	       
-               if ( debug ) {
-                 var s = "Button wurde angeklickt!\n";
-     	         s += getAncesterList(obj)
-	         var r = getRoot(obj)
-	         if ( r.host != null ) {
-		   var host = r.host;
-	           s += " host.id: "+host.id+"\n";
-	           s += getNodeDetails(host,r.firstChild);
-	           s += "\nnodeValue: "+host.nodeValue;
-		   s += "\nsubtree: "+host.subtree;
-	         }
-                 alert( s );
-	       }
-	     }
-
-
 	     function mouse(obj,nr,t) {
-	       win = getWindowNode(obj);
+	       win = getWindow(obj);
 	       toggle_mouse(t);
                if ( debug ) {
 	         var s = "Mouse "+t+"!\n";
@@ -237,7 +346,7 @@
 
 
 	     function drag_event(obj,nr,t) {
-	       win = getWindowNode(obj);
+	       win = getWindow(obj);
 	       toggle_drag(t,1);
                setTimeout(function(){ toggle_drag(t,0); },300);
 	       if ( debug ) {
@@ -248,7 +357,7 @@
 
 
 	     function bar_click(obj,nr) {
-	       getWindowNode(obj);
+	       getWindow(obj);
 	       toggle_click(1);
 	       setTimeout(function(){ toggle_click(0); },300);
 	       if ( debug ) {
@@ -256,6 +365,11 @@
                  alert('Bar wurde angeklickt!\n'+id)
                }
              }
+	       
+	     function debugOutput(text) {
+	       node = document.getElementById('dbg_output');
+	       node.textContent = text;
+	     }
 	       
 	     function toggle_debug(node) {
 	       debug = ! debug;
@@ -277,6 +391,16 @@
 	     function toggle_drag(name,on) {
 	       rect = document.getElementById('ind_drag_'+name);
 	       rect.style.fill = on ? "rgb(204,102,255)" : "rgb(112,153,204)"
+             }
+	       
+	     function toggle_btn(name,on) {
+	       rect = document.getElementById('ind_btn_'+name);
+	       if ( on ) {
+	         rect.style.fill = "rgb(204,102,255)"
+	         setTimeout(function(){ toggle_btn(name,0); },300);
+	       } else {
+	         rect.style.fill = "rgb(112,153,204)"
+	       }
              }
       ]]>
     </script>
@@ -301,68 +425,78 @@
       <path style="fill:rgb(  0,  0,  0)" d="M 0,0 L 9400,0 9400,9400 Z"/>
     </mask>
 
+    <!-- start template="w_led" -->
+    <g data-id="w_led">
+      <text class="LED" x="100" y="500">.</text>
+      <circle data-id="on"  class="LED" cx="200" cy="900"  r="200"/>
+      <circle data-id="dir" class="LED" cx="200" cy="1400" r="200"/>
+    </g>
+    <!-- end template="w_led" -->
+
+    <!-- start template="w_window" -->
+    <g data-id="w_window">
     
-    <g id="w_window" onmouseover="button_create(this,0)">
-    
-      <g id="w_name" transform="translate(0,0)" onclick="button_click(this,0)" onmousedown="mouse(this,0,1)" onmouseup="mouse(this,0,0)">
+      <g data-id="w_name" transform="translate(0,0)" onmousedown="P_Window.mouseEvent(this,0,1)" onmouseup="P_Window.mouseEvent(this,0,0)">
 	<rect class="Name" x="0" y="0" width="3000" height="2600"/>
 	<text class="Name" x="300" y="1900">.</text>
       </g>
     
-      <g id="w_btn_c" transform="translate(3000,0)" onclick="button_click(this,1)" onmousedown="mouse(this,1,1)" onmouseup="mouse(this,1,0)">
+      <g data-id="w_btn_c" transform="translate(3000,0)" onmousedown="P_Window.mouseEvent(this,1,1)" onmouseup="P_Window.mouseEvent(this,1,0)">
 	<rect class="Button" x="0" y="0" width="4700" height="2600"/>
 	<text class="Button" x="1614" y="1486">close</text>
       </g>
 
-      <g id="w_btn_o" transform="translate(7700,0)" onclick="button_click(this,2)" onmousedown="mouse(this,2,1)" onmouseup="mouse(this,2,0)">
+      <g data-id="w_btn_o" transform="translate(7700,0)" onmousedown="P_Window.mouseEvent(this,2,1)" onmouseup="P_Window.mouseEvent(this,2,0)">
 	<rect class="Button" x="0" y="0" width="4700" height="2600"/>
 	<text class="Button" x="1614" y="1486">open</text>
       </g>
     
-      <g id="w_btn_r" transform="translate(0,2600)" onclick="button_click(this,3)" onmousedown="mouse(this,3,1)" onmouseup="mouse(this,3,0)">
+      <g data-id="w_btn_r" transform="translate(0,2600)" onmousedown="P_Window.mouseEvent(this,3,1)" onmouseup="P_Window.mouseEvent(this,3,0)">
 	<rect class="Button" x="0" y="0" width="3000" height="4700"/>
 	<text class="Button" x="700" y="2500">raise</text>
       </g>
     
-      <g id="w_btn_l" transform="translate(0,7300)" onclick="button_click(this,4)">
+      <g data-id="w_btn_l" transform="translate(0,7300)" onmousedown="P_Window.mouseEvent(this,4,1)" onmouseup="P_Window.mouseEvent(this,4,0)">
 	<rect class="Button" x="0" y="0" width="3000" height="4700"/>
 	<text class="Button" x="700" y="2500">lower</text>
       </g>
 
-      <g id="id5" transform="translate(3000,2600)">
+      <g transform="translate(3000,2600)">
 	<path style="fill:url(#gradient_h)" d="M 0,0 L 9400,0 9400,9400 Z"/>
 	<path style="fill:url(#gradient_v)" d="M 0,0 L 0,9400 9400,9400 Z"/>
 
-	<g id="id5_h" style="mask:url(#mask_h)">
-	  <rect class="BarStatic" x="0" y="0" width="1100" height="9400" onclick="bar_click(this,5)" onmousedown="mouse(this,5,1)" onmouseup="mouse(this,5,0)" ondragstart="drag_event(this,5,0)" ondrag="drag_event(this,5,1)" ondragend="drag_event(this,5,2)"/>
-	  <g id="id5_hD" transform="translate(2000,0)">
+	<g data-id="opener" style="mask:url(#mask_h)">
+	  <rect data-id="bar" class="BarStatic" x="300" y="0" width="1100" height="9400" onmousedown="P_Window.mouseEvent(this,5,1)" onmouseup="P_Window.mouseEvent(this,5,0)"/>
+	  <g data-id="bar_state" transform="translate(2000,0)">
 	    <rect class="BarDynamic" x="0" y="0" width="1100" height="9400"/>
-	    <path class="BarMarker" d="M 100,550 L 1000,100 1000,1000 Z" style="display:none"/>
-	    <path class="BarMarker" d="M 1000,550 L 100,100 100,1000 Z" style="display:inline"/>
+	    <path data-id="dir_0" class="BarMarker" d="M 100,550 L 1000,100 1000,1000 Z" style="display:none"/>
+	    <path data-id="dir_1" class="BarMarker" d="M 1000,550 L 100,100 100,1000 Z" style="display:inline"/>
 	  </g>
 	</g>
 
-	<g id="id5_v" style="mask:url(#mask_v)">
-	  <rect class="BarStatic" x="0" y="6000" width="9400" height="1100" onclick="bar_click(this,6)" onmousedown="mouse(this,6,1)"  onmousemove="mouse(this,6,2)" onmouseup="mouse(this,6,0)"/>
-	  <g id="id5_vD" transform="translate(0,4000)">
+	<g data-id="shadow" style="mask:url(#mask_v)">
+	  <rect data-id="bar" class="BarStatic" x="0" y="6000" width="9400" height="1100" onmousedown="P_Window.mouseEvent(this,6,1)" onmouseup="P_Window.mouseEvent(this,6,0)"/>
+	  <g data-id="bar_state" transform="translate(0,4000)">
 	    <rect class="BarDynamic" x="0" y="0" width="9400" height="1100"/>
-	    <path class="BarMarker" d="M 550,100 L 100,1000 1000,1000 Z" style="display:none"/>
-	    <path class="BarMarker" d="M 550,1000 L 100,100 1000,100 Z" style="display:inline"/>
+	    <path data-id="dir_0" class="BarMarker" d="M 550,100 L 100,1000 1000,1000 Z" style="display:none"/>
+	    <path data-id="dir_1" class="BarMarker" d="M 550,1000 L 100,100 1000,100 Z" style="display:inline"/>
 	  </g>
 	</g>
 	
       </g>
 
     </g>
+    <!-- end template="w_window" -->
 
   </defs>
 
-  <use id="win_R1" href="#w_window" x="500"   y="500"/>
-  <use id="win_R2" href="#w_window" x="13500" y="500"/>
-  <use id="win_R3" href="#w_window" x="26500" y="500"/>
-  <use id="win_R4" href="#w_window" x="39500" y="500"/>
+  <use id="win_L1" href="#w_window" x="500"   y="500"/>
+  <use id="win_L2" href="#w_window" x="13500" y="500"/>
+  <use id="win_L3" href="#w_window" x="26500" y="500"/>
+  <use id="win_L4" href="#w_window" x="39500" y="500"/>
   
-  <use id="win_L1" href="#w_window" x="500"   y="13000"/>
+  <use id="win_R1" href="#w_window" x="500"   y="13000"/>
+  <use id="win_R4" href="#w_window" x="39500" y="13000"/>
 
   <g transform="translate(13500,13000)" onclick="toggle_debug(this)">
     <rect id="btn_debug_face" class="Button" x="0" y="0" width="3000" height="1800"/>
@@ -406,4 +540,48 @@
   </g>
 
   
+  <g transform="translate(19700,13000)" onclick="toggle_debug(this)">
+    <rect id="ind_btn_click" class="Button" x="0" y="0" width="3000" height="1800"/>
+    <text class="Button" x="500" y="1400">click</text>
+  </g>
+
+  <g transform="translate(19700,14900)">
+    <rect id="ind_btn_press" class="Button" x="0" y="0" width="3000" height="1800"/>
+    <text class="Button" x="500" y="1400">press</text>
+  </g>
+
+  <g transform="translate(19700,16800)">
+    <rect id="ind_btn_release" class="Button" x="0" y="0" width="3000" height="1800"/>
+    <text class="Button" x="500" y="1400">release</text>
+  </g>
+  
+  <g transform="translate(19700,18700)">
+    <rect id="ind_btn_move" class="Button" x="0" y="0" width="3000" height="1800"/>
+    <text class="Button" x="500" y="1400">move</text>
+  </g>
+
+
+  <g transform="translate(22800,13000)">
+    <rect class="Text" x="0" y="0" width="15000" height="1800"/>
+    <text id="dbg_output" class="DbgOut" x="300" y="1400">.</text>
+  </g>
+
+  <g transform="translate(22800,14900)">
+    <rect class="Text" x="0" y="0" width="15000" height="1800"/>
+    <circle id="LED_enable" class="LED" cx="300" cy="400" r="200"/>
+
+    <use id="win_led_0" href="#w_led" x="600"  y="0"/>
+    <use id="win_led_1" href="#w_led" x="1100" y="0"/>
+    <use id="win_led_2" href="#w_led" x="1600" y="0"/>
+    <use id="win_led_3" href="#w_led" x="2100" y="0"/>
+    <use id="win_led_4" href="#w_led" x="2600" y="0"/>
+    <use id="win_led_5" href="#w_led" x="3100" y="0"/>
+    <use id="win_led_6" href="#w_led" x="3600" y="0"/>
+    <use id="win_led_7" href="#w_led" x="4100" y="0"/>
+    <use id="win_led_8" href="#w_led" x="4600" y="0"/>
+    <use id="win_led_9" href="#w_led" x="5100" y="0"/>
+    <use id="win_led_10" href="#w_led" x="5600" y="0"/>
+    <use id="win_led_11" href="#w_led" x="6100" y="0"/>
+  </g>
+
 </svg>

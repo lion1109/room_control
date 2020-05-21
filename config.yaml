@@ -3,73 +3,106 @@ project:
 
 web:
   domain:       room.local
-  bind:         "127.0.0.1:4443"
-  cert_path:    config/cert.pem
+  bind:         "127.0.1.2:4080"
+  #bind:         "127.0.1.2:4443"
+  #cert_path:    config/cert.pem
   cert_subject: "/C=DE/ST=Lower Saxony/L=My City/O=My Organization/OU=Service/CN=$domain/emailAddress=person@example.org"
 
 room:
 
-  defaults:
-    position_min:    0 # closed
-    position_max:  100 # open
-    opener_speed:   10 # 10 % per second
-    shadow_speed:   10 # 10 % per second
+  shift_register:      # hardware configuration
+    pinDATA:    7      # pin  7 = GPIO4 
+    pinCLOCK:  11      # pin 11 = GPIO17
+    pinLATCH:  13      # pin 13 = GPIO27
+    pinENABLE: 15      # pin 15 = GPIO22
+    bits:      24      # number of bits in the shift register
+
+  defaults:            # defaults for the room window configuration
+    opener:            # window opener data
+      position_min:     0.0 # closed
+      position_max:   100.0 # open
+      speed_dir0:       5.0 # % per second, speed to open the window
+      speed_dir1:       5.0 # % per second, speed to close the window
+      hard_pos_min:   -10.0 # hard motor position to close from pos_min to hard min end motor position
+      hard_pos_max:   110.0 # hard motor position to close from pos_max to hard max end motor position
+      slip:             3.0 # difference of position when moved from different directions to a hard_pos
+      drift:           0.01 # position difference (uncertenty) per moved position 
+    blind:             # roller blind data
+      position_min:     0.0 # closed
+      position_max:   100.0 # open
+      speed_dir0:       5.0 # pos units per second, speed to open the window
+      speed_dir1:       5.0 # pos units per second, speed to close the window
+      hard_pos_min:   -10.0 # hard motor position to close from pos_min to hard min end motor position
+      hard_pos_max:   110.0 # hard motor position to close from pos_max to hard max end motor position
+      slip:             3.0 # difference of position when moved from different directions to a hard_pos
+      drift:           0.01 # position difference (uncertenty) per moved position 
+      # 
+      turn_pos_diff:   10.0 # position difference to turn the blind slat
+      angle_min:        0.0 # fully open slat 
+      angle_max:      100.0 # fully closed slat    
 
   windows:
-    count:         8
+    count:         6
 
   window_0:
-    id:             win_l1
+    id:             L1
     name:           "links 1 (1. von vorne)"
-    opener_on_bit:  0
-    opener_dir_bit: 1
-    shadow_on_bit:  3
-    shadow_dir_bit: 4
+    opener:
+      on_bit:  0
+      dir_bit: 1
+    blind:
+      on_bit:  3
+      dir_bit: 4
+
   window_1:
-    id:             win_l2
+    id:             L2
     name:           "links 2 (2. von vorne)"
-    opener_on_bit:  5
-    opener_dir_bit: 6
-    shadow_on_bit:  7
-    shadow_dir_bit: 8
+    opener:
+      on_bit:  5
+      dir_bit: 6
+    blind:
+      on_bit:  7
+      dir_bit: 8
+      
   window_2:
-    id:             win_l3
+    id:             L3
     name:           "links 3 (3. von vorne)"
-    opener_on_bit:  9
-    opener_dir_bit: 10
-    shadow_on_bit:  11
-    shadow_dir_bit: 12
+    opener:
+      on_bit:   9
+      dir_bit: 10
+    blind:
+      on_bit:  11
+      dir_bit: 12
+      
   window_3:
-    id:             win_l4
-    name:           "links 4 (4. von vorne)"
-    opener_on_bit:  13
-    opener_dir_bit: 14
-    shadow_on_bit:  15
-    shadow_dir_bit: 16
+    id:             L4
+    name:           "links hinten (4. und 5. von vorne)"
+    opener:
+      on_bit:  13
+      dir_bit: 14
+    blind:
+      on_bit:  15
+      dir_bit: 16
+
   window_4:
-    id:             win_r1
-    name:           "rechts 1 (1. von vorne)"
-    opener_on_bit:  17
-    opener_dir_bit: 18
-    shadow_on_bit:  19
-    shadow_dir_bit: 20
+    id:             R1
+    name:           "rechts vorne (1. und 2. von vorne)"
+    opener:
+      on_bit:  17
+      dir_bit: 18
+    blind:
+      on_bit:  19
+      dir_bit: 20
+    
   window_5:
-    id:             win_r2
-    name:           "rechts 2 (2. von vorne)"
-    opener_linked:  win_r1
-    shadow_linked:  win_r1
-  window_6:
-    id:             win_r3
-    name:           "rechts 3 (3. von vorne)"
-    opener_on_bit:  21
-    opener_dir_bit: 22
-    shadow_on_bit:  23
-    shadow_dir_bit: 24
-  window_7:
-    id:             win_r4
-    name:           "rechts 4 (4. von vorne)"
-    opener_linked:  win_r3
-    shadow_linked:  win_r3
+    id:             R4
+    name:           "rechts hinten (3. und 4. von vorne)"
+    opener:
+      on_bit:  21
+      dir_bit: 22
+    blind:
+      on_bit:  23
+      dir_bit: 24
 
   dimmer:
     count: 1
