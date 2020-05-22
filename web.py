@@ -42,13 +42,13 @@ else:
     ServerBaseClass = HTTPServer
 
 
-    
+
 LOG_CRITICAL = 0
 LOG_ERROR    = 1 
 LOG_WARN     = 2 
 LOG_DEBUG    = 3 
-LOG_CALLS    = 4
-currentLogLevel = LOG_DEBUG
+LOG_CALL     = 4
+currentLogLevel = LOG_WARN
 def log(level,msg):
     if level <= currentLogLevel:
         #rint(msg,file=sys.stderr)
@@ -59,7 +59,7 @@ def printError(args):
     print(args,file=sys.stderr)
 
 
-
+            
 MANDATORY = object()
 
 
@@ -120,6 +120,7 @@ class ShiftRegister: # 74HC595
         self.dirty     = True
         self.output    = None
 
+        
     def shiftBit(self,bit=0):
         GPIO.output(self.pinCLOCK, GPIO.LOW)
         GPIO.output(self.pinDATA,  bit and GPIO.HIGH or GPIO.LOW)
@@ -190,6 +191,18 @@ class Motor:
 
     busy_motors = {}
 
+    DIR_FORWARD  =  0 # open the window, lower the blind, close the blind slats
+    DIR_BACKWARD =  1 # close the window, lower the blind, open the blind, slats
+    STOP_MOTOR   = -1 # for _planDrive
+
+    STATE_NEED_POS      = 0 # initital state
+    STATE_DETERMINE_POS = 1 # driving to determine the position
+    STATE_DRIVE_MANUAL  = 2 # initital state
+    STATE_DRIVE_TO_POS  = 3 # initital state
+    
+    # The tricky thing of the blind motor is to handle how far it moved backward.
+    # Moving backward opens the blind slat before raising the blind 
+    
     def checkBusyMotors():
         ids = [ id for id in Motor.busy_motors ]
         for id in ids:
@@ -197,13 +210,15 @@ class Motor:
                 motor = Motor.busy_motors[id]
             except:
                 break
-            log(LOG_CALLS,'call motor._checkDrive()')
+            #log(LOG_CALL ,'\ncall motor._checkDrive()')
+            print('\ncall motor._checkDrive()')
             motor._checkDrive()
             
         
     def __init__(self,room,id,config,motorType,hard_position=None):
-        self.id       = id
-        self.room     = room
+        self.id        = id
+        self.room      = room
+        self.motorType = motorType
         
         self.bitOn           = config.get('on_bit',MANDATORY)
         self.bitDir          = config.get('dir_bit',MANDATORY)
@@ -230,16 +245,18 @@ class Motor:
         self.state           = 0 # 0 = stopped, 1 = determine, 2 = manual, 3 = to position
         self.d_pos_max       = ( self.hard_pos_max - self.hard_pos_min ) / 100
         self.d_pos_back_max  = self.pos_back_max / 30
+        self.drift_sum       = 0
         
         self.hard_pos        = hard_position
         self.hard_pos_back   = 0
 
-        self.drive_start_time     = None
-        self.drive_start_pos      = None
-        self.drive_start_pos_back = None
-        self.drive_to_pos         = None
-        self.drive_to_pos_back    = None
-        self.drive_direction      = None
+        self.drive_start_time      = None
+        self.drive_start_pos       = None
+        self.drive_start_pos_back  = None
+        self.drive_start_drift_sum = None
+        self.drive_to_pos          = None
+        self.drive_to_pos_back     = None
+        self.drive_direction       = None
 
     def __str__(self):
         return 'Motor: {}'.format(str({'id':self.id,'bitOn':self.bitOn,'bitDir':self.bitDir,'position_min':self.position_min,'position_max':self.position_max}))
@@ -248,6 +265,8 @@ class Motor:
     def getPosition(self):
         if self.hard_pos is None:
             self.determinePosition()
+            while self.hard_pos is None:
+                time.sleep(1)
         pos = self.hard_pos
         if   pos < self.position_min: pos = self.position_min
         elif pos > self.position_max: pos = self.position_max
@@ -272,11 +291,11 @@ class Motor:
         if 1 == dir:
             self.hard_pos_back = 0
             self.hard_pos      = self.hard_pos_max
-            self._startDrive(None,self.position_min,self.angle_max)
+            self._startDrive(None,self.hard_pos_min,self.pos_back_max)
         else:
             self.hard_pos_back = self.pos_back_max
             self.hard_pos      = self.hard_pos_min
-            self._startDrive(None,self.position_max,self.angle_mim)
+            self._startDrive(None,self.hard_pos_max,0)
         self.state = 1
             
 
@@ -287,7 +306,7 @@ class Motor:
         now = time.time()
         pos_back = self.drive_start_pos_back
         pos      = self.drive_start_pos
-        if 0 == self.drive_direction: # forward
+        if self.DIR_FORWARD == self.drive_direction:
             dt = now - self.drive_start_time
             s  = dt * self.speed_dir0
             pos_back -= s
@@ -295,7 +314,7 @@ class Motor:
                 pos -= pos_back
                 pos_back = 0
             if pos > self.hard_pos_max: pos = self.hard_pos_max
-        elif 1 == self.drive_direction: # backward
+        elif self.DIR_BACKWARD == self.drive_direction:
             dt = now - self.drive_start_time
             s  = dt * self.speed_dir1
             pos_back += s
@@ -306,6 +325,7 @@ class Motor:
         else:
             raise ValueError("Internal error: direction={}".format(self.drive_direction))
 
+        log(LOG_DEBUG, "_calcHardPos returns: {}, {}".format(pos,pos_back))
         self.hard_pos      = pos
         self.hard_pos_back = pos_back
 
@@ -340,7 +360,7 @@ class Motor:
 
 
     def _planDrive(self): # determine direction to drive 
-        print( "_planDrive() state:{}, dir:{}".format(self.state,self.drive_direction) )
+        log(LOG_DEBUG, "_planDrive() state:{}, dir:{}, to: {},{}".format(self.state,self.drive_direction,self.drive_to_pos,self.drive_to_pos_back) )
 
         dir = None
         
@@ -349,64 +369,70 @@ class Motor:
             d_pos = self.drive_to_pos - self.hard_pos
             print("d_pos: {}, d_pos_max = {}".format(d_pos, self.d_pos_max))
             if abs(d_pos) > self.d_pos_max:
-                return 0 if self.hard_pos < self.drive_to_pos else 1
+                return self.DIR_FORWARD if self.hard_pos < self.drive_to_pos else self.DIR_BACKWARD
             else:
-                dir = -1
+                dir = self.STOP_MOTOR
 
         if self.drive_to_pos_back is not None:
             d_pos = self.drive_to_pos_back - self.hard_pos_back
             print("d_pos: {}, d_pos_max_back = {}".format(d_pos, self.d_pos_back_max))
             if abs(d_pos) > self.d_pos_back_max:
-                return 1 if 0 == self.drive_direction else 0
+                return self.DIR_BACKWARD1 if self.hard_pos_back < self.drive_to_pos_back else self.DIR_FORWARD
             else:
-                dir = -1
+                dir = self.STOP_MOTOR
 
         return dir
             
 
     def _checkDrive(self):
-        print( "_checkDrive() state:{}, dir:{}".format(self.state,self.drive_direction) )
+        print( "_checkDrive() id: {}, state:{}, dir:{}".format(self.id,self.state,self.drive_direction) )
         if 0 == self.state: return
 
         self._calcHardPos()
 
-        if 1 == self.state or 3 == self.state:
+        if self.STATE_DETERMINE_POS == self.state or self.STATE_DRIVE_TO_POS == self.state:
             dir = self._planDrive()
-        elif 2 == self.state:
+        elif self.STATE_DRIVE_MANUAL == self.state:
             dir = None
-            if 0 == self.drive_direction:
+            if self.DIR_FORWARD == self.drive_direction:
                 if self.hard_pos >= self.hard_pos_max and self.hard_pos_back >= self.hard_pos_back_max:
-                    dir = -1
-            else:
+                    dir = self.STOP_MOTOR
+            elif self.DIR_BACKWARD == self.drive_direction:
                 if self.hard_pos <= self.hard_pos_min and self.hard_pos_back <= 0:
-                    dir = -1
-
+                    dir = self.STOP_MOTOR
+            
         log(LOG_DEBUG, "_checkDrive state:{} dir:{} is:{},{} to:{},{}, new dir:{}".format(self.state, self.drive_direction, self.hard_pos, self.hard_pos_back, self.drive_to_pos, self.drive_to_pos_back, dir))
 
         if dir is None:
-            log(LOG_DEBUG,'dir=None in _checkDrive')
-        elif -1 == dir:
+            log(LOG_DEBUG, 'dir=None in _checkDrive')
+        elif self.STOP_MOTOR == dir:
             self._stopMotor()
         elif dir != self.drive_direction:
             self._startMotor(dir)
         else:
-            log(LOG_DEBUG,'dir not changed in _checkDrive()')
+            log(LOG_DEBUG, 'dir not changed in _checkDrive()')
 
-        
+
     def _startDrive(self,dir,to_pos,to_pos_back):
         print("_startDrive({}, {}, {})".format(dir,to_pos,to_pos_back))
 
         if self.hard_pos is None:
             self.determinePosition()
 
-        state = 0
+        state = self.STATE_NEED_POS
         if dir is not None:
             if to_pos is not None or to_pos_back is not None:
                 raise ValueError( 'in _startDrive dir and to_pos/to_pos_back are specified')
-            state = 2
+            state = self.STATE_DRIVE_MANUAL
         else:
             if to_pos is None and to_pos_back is None:
                 raise ValueError( 'in _startDrive neither dir nor to_pos/to_pos_back are specified')
+            if to_pos is not None:
+                if to_pos < self.hard_pos_min or to_pos > self.hard_pos_max:
+                    raise ValueError( '_startDrive to_pos: {} is not in range [{}, {}]'.format(self.hard_pos_min,self.hard_pos_max))
+            if to_pos_back is not None:
+                if to_pos_back < 0 or to_pos_back > self.pos_back_max:
+                    raise ValueError( '_startDrive to_pos_back: {} is not in range [0, {}]'.format(self.pos_back_max))
             self.drive_to_pos      = to_pos
             self.drive_to_pos_back = to_pos_back
             dir = self._planDrive()
@@ -415,7 +441,7 @@ class Motor:
                 self.drive_to_pos      = None
                 self.drive_to_pos_back = None
                 return
-            state = 3
+            state = self.STATE_DRIVE_TO_POS
 
         self._startMotor(dir)
         self.state = state 
@@ -448,7 +474,38 @@ class Motor:
                 self._stopDrive()
                 return
         self._startDrive(dir,None,None)
+
         
+    def getConfig(self):
+        data = { 'bitOn':  self.bitOn,
+                 'bitDir': self.bitDir,
+                 'hard_pos_min': self.hard_pos_min,
+                 'hard_pos_max': self.hard_pos_max,
+                 'position_min': self.position_min,
+                 'position_max': self.position_max,
+                 'slip':  self.slip,
+                 'drift': self.drift
+               }
+        
+        if 'blind' == self.motorType: 
+            data['pos_back_max'] = self.pos_back_max
+            data['angle_min'] = self.angle_min
+            data['angle_max'] = self.angle_max
+            
+        return data
+
+
+    def getState(self):
+        data = { 'hard_pos':        self.hard_pos,
+                 'hard_pos_back':   self.hard_pos_back,
+                 'position':        self.getPosition(),
+                 'drift_sum':       self.drift_sum,
+                 'state':           self.state,
+                 'drive_direction': self.drive_direction,
+               }
+        return data
+
+    
     
 class Window:
 
@@ -474,9 +531,25 @@ class Window:
         else:
             self.blind = motor
         return motor
-    
 
     
+    def getConfig(self):
+        return { 'id':     self.id,
+                 'name':   self.name,
+                 'opener': self.opener.getConfig(),
+                 'blind':  self.blind.getConfig()
+               }
+
+    
+    def getState(self):
+        return { 'id':     self.id,
+                 'name':   self.name,
+                 'opener': self.opener.getState(),
+                 'blind':  self.blind.getState()
+               }
+    
+
+
 class RoomEvent:
     
     def __init__(self,room,args):
@@ -532,7 +605,7 @@ class SetPositionEvent (MotorEvent):
         super().__init__(room,args)
         self.pos   = int(args['pos']  )
         self.angle = int(args['angle']) if args['angle'] is not None else None
-        #print( "SetPositionEvent( {}, {} ), motor: {}".format(room,args,str(self.motor)) )
+        #print( "SetPositionEvent.__init__( {}, {} ), motor: {}".format(room,args,str(self.motor)) )
         if self.pos < self.motor.position_min or self.pos > self.motor.position_max:
             raise ValueError('pos {} is not in the range of [{}, {}]'.format(self.pos,self.motor.position_min,self.motor.position_max))
         if self.angle is not None and ( self.angle < self.motor.angle_min or self.angle > self.motor.angle_max ):
@@ -540,7 +613,7 @@ class SetPositionEvent (MotorEvent):
         
 
     def handle(self,room):
-        print( "SetPositionEvent() {}, {}".format(self.pos,self.angle) )
+        print( "\nSetPositionEvent.handle() {}, {}".format(self.pos,self.angle) )
         self.motor.driveToPosition(self.pos,self.angle)
 
 
@@ -568,14 +641,14 @@ class Room:
 
     def __init__(self,config):
         self.config    = config
-        self.spinRate  = 5 # hz
+        self.spinRate  = self.config.get('spin_rate', 10) # hz
         self.events    = []
         self.eventLock = _thread.allocate_lock()
         self.reqLock   = _thread.allocate_lock()
         self.initError = None
         self.windows   = {}
         self.motors    = {}
-        
+
         self.init_shift_register()
         self.init_windows()
         self.init_dimmer()
@@ -656,9 +729,24 @@ class Room:
 
     def doRequest(self,action,args):
         if 'sr_state' == action:
-            return { 'result': 0, 'sr_state': { 'bits': self.shift_register.bitsCnt, 'output': self.shift_register.output } }
+            return { 'result': 0, 'sr_state':   { 'bits': self.shift_register.bitsCnt, 'output': self.shift_register.output } }
+        if 'window/config' == action:
+            window = self.windows[args['win_id']]
+            return { 'result': 0, 'win_config': window.getConfig() }
         if 'window/state' == action:
-            return { 'result': 0, 'win_state': { 'bits': self.shift_register.bitsCnt, 'output': self.shift_register.output } }
+            win_id = args['win_id']
+            if win_id is None:
+                data = { 'result': 0,
+                         'window': { 'count': len(self.windows) },
+                       }
+                i = 0
+                for win in self.windows.values():
+                    data['window_'+str(i)] = win.getState()
+                    i += 1
+                return data
+            else:
+                window = self.windows[args['win_id']]
+                return { 'result': 0, 'win_config': window.getState() }
         return { 'result': 1, 'error': 'unknown request '+str(action) }
 
         
@@ -680,14 +768,20 @@ class Room:
             time.sleep(spinInterval)
 
         
-    def getWindows(self):
-        # todo
-        pass
-
-
-    def getDimmer(self):
-        # todo
-        pass
+    def getConfig(self):
+        data = { 'spin_rate': self.spin_rate,
+                 'shift_register': { 'pinDATA':   self.config.get('shift_register.pinDATA'),
+                                     'pinCLOCK':  self.config.get('shift_register.pinCLOCK'),
+                                     'pinLATCH':  self.config.get('shift_register.pinLATCH'),
+                                     'pinENABLE': self.config.get('shift_register.pinENABLE'),
+                                   },
+                 'windows': { 'count': len(self.windows) }
+               }
+        i = 0
+        for win in self.windows.values():
+            data['window_'+str(i)] = win.getConfig()
+            i += 1
+        return data
 
 
 
@@ -697,22 +791,22 @@ usePat1     = re.compile(br'(<use\s+id="[\w\.\-]+"\s+href="#[\w\.\-]+"\s+x="\d+"
 usePat2     = re.compile(br'(<use\s+id="([\w\.\-]+)"\s+href="#([\w\.\-]+)"\s+x="(\d+)"\s+y="(\d+)"\s*/>)')
 
 def handleContentSVG(content): # replace <use href="#templID" ...> by content of <!-- start template="templID"-->...<!-- end template="templID" -->
-    print("handleContentSVG")
+    log(LOG_CALL, 'handleContentSVG()' )
     map = {}
     for c in templatePat.finditer(content):
-        print("c: "+str(c)+', '+str(c.group(0))+', '+str(c.group(1))+', '+str(c.group(2)))
+        #print("c: "+str(c)+', '+str(c.group(0))+', '+str(c.group(1))+', '+str(c.group(2)))
         map[c.group(1)] = c.group(2)
     cont = b'';
-    print("svg map: "+str(map))
+    #print("svg map: "+str(map))
     for c in usePat1.split(content):
-        print( "\n\n\nchunk: '{}'".format(str(c)) )
+        #print( "\n\n\nchunk: '{}'".format(str(c)) )
         m = usePat2.match(c)
         if m:
             id   = m.group(2)
             href = m.group(3)
             x    = m.group(4)
             y    = m.group(5)
-            print("use: {} href='{}'".format(str(id),str(href)))
+            log(LOG_DEBUG, "use: {} href='{}'".format(str(id),str(href)))
             cont += b'<g id="'+id+b'" transform="translate('+x+b','+y+b')">\n'+map[href]+b'\n</g>'
         else:
             cont += c
@@ -724,12 +818,7 @@ class RequestHandler(BaseHTTPRequestHandler):
 
 
     server_version = 'Room-Control/0.0.1'
-        
-                              
-    #def __init__ (self,server):
-    #    self.projectServer = server
-    #    super(BaseHTTPRequestHandler,self).__init__()
-
+                   
     def get_parsed_path(self):
         try:
             return self.parsed_path
@@ -781,6 +870,7 @@ class RequestHandler(BaseHTTPRequestHandler):
         param = {}
         if defaults is not None:
             for k in defaults:
+                log(LOG_WARN, "k: '{}' of: {}".format(k,defaults))
                 default = defaults[k]
                 value   = self.parameter_value(k,default);
                 if MANDATORY == value:
@@ -792,10 +882,14 @@ class RequestHandler(BaseHTTPRequestHandler):
     def handleRequestRequest(self,path,params=None):
         req = path[9:]; # cut of leading /request/
         req = req[0:len(req)-5]; # cut of tailing .json
+        project = self.server.project
         try:
             param = self.parameter_args(params)
             print("req: '{}, param: {}'".format(req,param))
-            data = self.server.room.doRequest(req,param)
+            if 'config' == req:
+                data = { 'result': 0, 'config': project.getConfig() }
+            else:
+                data = project.room.doRequest(req,param)
         except ValueError as err:
             data = { 'result': 1, 'error': str(err) }
         content = json.dumps(data)
@@ -804,6 +898,7 @@ class RequestHandler(BaseHTTPRequestHandler):
 
 
     def do_GET(self):
+        project     = self.server.project
         encoding    = 'utf-8'
         status      = 200
         content     = None
@@ -812,16 +907,16 @@ class RequestHandler(BaseHTTPRequestHandler):
         path = parsed_path['path']
         print( "parsed_path: "+str(parsed_path))
         if '/' == path: path = '/index.html'
-        if '/request/static.json' == path:
+        if '/request/config.json' == path:
             ( content, contentType ) = self.handleRequestRequest(path)
         elif '/request/window/config.json' == path:
-            ( content, contentType ) = self.handleRequestRequest(path,{'win_id':MANDATORY})
+            ( content, contentType ) = self.handleRequestRequest(path,{'win_id':None})
         elif '/request/window/state.json' == path:
-            ( content, contentType ) = self.handleRequestRequest(path,{'win_id':MANDATORY})
+            ( content, contentType ) = self.handleRequestRequest(path,{'win_id':None})
         elif '/request/sr_state.json' == path:
             ( content, contentType ) = self.handleRequestRequest(path)
         elif '/request/window/action.json' == path:
-            room = self.server.room
+            room = project.room
             data = {}
             try:
                 args = self.parameter_args({'action':MANDATORY,'win_id':MANDATORY,'motor':MANDATORY,'dir':None,'pos':None,'angle':None,'stop':None})
@@ -864,7 +959,7 @@ class RequestHandler(BaseHTTPRequestHandler):
             status = 404
             content = "illegal request: GET '"+self.path+"', '"+str(full_path)+"'"
         else:
-            full_path = self.server.base_dir+'/web'+path
+            full_path = project.base_dir+'/web'+path
             try:
                 file = open(full_path, 'rb')
             except FileNotFoundError as e:
@@ -905,20 +1000,53 @@ class RequestHandler(BaseHTTPRequestHandler):
         response.write(body)
         self.wfile.write(response.getvalue())
 
- 
+
+
+bindPat = re.compile(r'^(tls:)?(.*):(\d+)$' )
+
+class CommServer ( ServerBaseClass ):
+
+    def __init__(self,project,bind):
+        self.project = project
+        
+        #( address, port ) = bind.split(':')
+        match = bindPat.match(bind)
+        if not match:
+            raise ValueError("illegal bind address: '{}'".format(bind))
+        tls     = match.group(1) is not None
+        address = match.group(2)
+        port    = int(match.group(3))
+        print( "address: '{}', port: {}, tls: ".format(address, port, tls))
+
+        super(ServerBaseClass, self).__init__( (address,port), RequestHandler )
+               
+        if tls:
+            cert_path = project.cert_path
+            if cert_path is None:
+                raise ValueError("cert_path not specified for {}".format(bind))
+            if cert_path[0] != '/':
+                cert_path = project.base_dir + '/' + cert_path
+            # using a SSLContext
+            context = ssl.create_default_context(purpose=ssl.Purpose.CLIENT_AUTH, cafile=None, capath=None, cadata=None)
+            context.load_cert_chain(cert_path)            
+            self.socket = context.wrap_socket( self.socket, server_side=True )
+
+        #mimetypes.init()      
+        #print( 'mimetypes: '+str(mimetypes.types_map) )
+        #self.extensions_map = mimetypes.types_map
+
+
     
-
-class ProjectServer ( ServerBaseClass ):
-
+class Project:
 
     def __init__ (self,config):
         self.config = config
 
         self.base_dir  = config.get( 'project.directory'         )
         self.domain    = config.get( 'web.domain',   'localhost' )
-        self.directory = config.get( 'web.directory','docs'      )
-        bind      = config.get( 'web.bind',     'localhost:8080' )
-        cert_path = config.get( 'web.cert_path' )
+        self.directory = config.get( 'web.directory','web'       )
+        self.cert_path = config.get( 'web.cert_path' )
+        self.binds     = config.get( 'web.bind',     'localhost:8080' )
         
         if self.base_dir is None:
             raise ValueError('project.directory is not configured')
@@ -927,27 +1055,30 @@ class ProjectServer ( ServerBaseClass ):
         if self.directory is None:
             raise ValueError('project.directory is not configured')
 
-        ( address, port ) = bind.split(':')
-        print( "address: '"+str(address)+"' port: '"+str(port)+"'" )
+        self.servers = [ CommServer(self,bind) for bind in self.binds.split(',') ]
 
-        super(ServerBaseClass, self).__init__( (address,int(port)), RequestHandler )
-        if cert_path is not None:
-            if cert_path[0] != '/':
-                cert_path = self.base_dir + '/' + cert_path
-            # using a SSLContext
-            context = ssl.create_default_context(purpose=ssl.Purpose.CLIENT_AUTH, cafile=None, capath=None, cadata=None)
-            context.load_cert_chain(cert_path)
-            self.socket = context.wrap_socket( self.socket, server_side=True )
-            # deprecated without SSLContext
-            #self.socket = ssl.wrap_socket( self.socket, certfile=cert_path, server_side=True)
+        
+    def serve_forever(self):
+        for server in self.servers[1:]:
+            _thread.start_new_thread(server.serve_forever,())
+        self.servers[0].serve_forever()
 
-        mimetypes.init()      
-        print( 'mimetypes: '+str(mimetypes.types_map) )
-        self.extensions_map = mimetypes.types_map
-
-
-    def set_room (self,room):
+        
+    def set_room(self,room):
         self.room = room
+
+        
+    def getConfig(self):
+        return { 'web': { 'base_dir':  self.base_dir,
+                          'directory': self.directory,
+                          'domain':    self.domain,
+                          'cert_path': self.cert_path,
+                          'binds':     self.binds,
+                          
+                        },
+                 'version': RequestHandler.server_version,
+                 'room': self.room.getConfig(),
+               }
 
 
 
@@ -974,22 +1105,22 @@ if __name__ == '__main__':
         sys.exit(-1)
     
     if cmd == 'run':
-        try:
+        #try:
             config_dict = yaml.load(open(confPath, 'r')) 
             print( "config: "+str(config_dict) )
             config = Config(config_dict)
             room = Room(config.subConfig('room'))
             _thread.start_new_thread(room.serve_forever,())
-            server = ProjectServer(config)
+            server = Project(config)
             server.set_room(room)
             
             try:
                 server.serve_forever()
             except KeyboardInterrupt:
                 pass
-        except Exception as e:
-            printError( str(e) )
-            sys.exit(-1)
+        #except Exception as e:
+        #    printError( str(e) )
+        #    sys.exit(-1)
             
     elif cmd == 'config':
         config = yaml.load(open(confPath, 'r'))

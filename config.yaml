@@ -1,11 +1,16 @@
 project:
-  directory: /home/eduard/Privat/R3P/room_control
+  directory: /home/eduard/Privat/R3P/room_control # project base directory 
 
 web:
-  domain:       room.local
-  bind:         "127.0.1.2:4080"
-  #bind:         "127.0.1.2:4443"
-  #cert_path:    config/cert.pem
+  domain:       room.local    # domainname
+  
+  # list of ip addresses to bind to, tls: prefix for https, ipv6 enclosed in "[]"
+  bind:         "127.0.1.2:4080,tls:127.0.1.2:4443" # default: "localhost:8080"
+  
+  # TLS handling:
+  # To handle https requests the cert_path has to be specified.
+  # The cert_subject is used to install a selfsigned certificate.
+  cert_path:    config/cert.pem  # tls certificate file for https
   cert_subject: "/C=DE/ST=Lower Saxony/L=My City/O=My Organization/OU=Service/CN=$domain/emailAddress=person@example.org"
 
 room:
