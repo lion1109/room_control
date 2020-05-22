@@ -1,9 +1,11 @@
 #!/bin/bash
 
-baseDir="${0%%/*}"
+baseDir="${0%/*}"
+echo "0 = '$0', baseDir = '$baseDir'"
 if [[ "$baseDir" != /* ]]; then baseDir="$(pwd)/$baseDir"; fi
+echo "baseDir = '$baseDir'"
 baseDir="${baseDir%%/.}"
-
+echo "baseDir = '$baseDir'"
 
 function info () {
   echo "command: $0"
