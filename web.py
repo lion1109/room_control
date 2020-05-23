@@ -118,6 +118,7 @@ class ShiftRegister: # 74HC595
         self.bytesCnt  = int( (bits+7) / 8 )
         self.byteArray = [ 0x00 for i in range(0,self.bytesCnt) ]
         self.dirty     = True
+        self.enabled   = None
         self.output    = None
 
         
@@ -183,10 +184,18 @@ class ShiftRegister: # 74HC595
 
         
     def enable(self,bit=1):
+        self.enabled = bit and 1 or 0
         GPIO.output(self.pinENABLE, bit and GPIO.HIGH or GPIO.LOW)
 
-
         
+    def getState(self):
+        return  { 'enable': self.enabled,
+                  'bits':   self.bitsCnt,
+                  'output': self.output
+                }
+
+
+    
 class Motor:
 
     busy_motors = {}
@@ -729,7 +738,16 @@ class Room:
 
     def doRequest(self,action,args):
         if 'sr_state' == action:
-            return { 'result': 0, 'sr_state':   { 'bits': self.shift_register.bitsCnt, 'output': self.shift_register.output } }
+            return { 'result': 0, 'sr_state':   self.shift_register.getState() }
+        if 'sr_toggle' == action:
+            sr  = self.shift_register;
+            bit = int(args['bit'])
+            if -1 == bit:
+                sr.enable( 0 if sr.enabled else 1 )
+            else:
+                b = sr.getBit(bit)
+                self.shift_register.setBit( 0 if b else 1 )
+            return { 'result': 0, 'sr_state':   self.shift_register.getState() }
         if 'window/config' == action:
             window = self.windows[args['win_id']]
             return { 'result': 0, 'win_config': window.getConfig() }
@@ -795,6 +813,7 @@ def handleContentSVG(content): # replace <use href="#templID" ...> by content of
     map = {}
     for c in templatePat.finditer(content):
         #print("c: "+str(c)+', '+str(c.group(0))+', '+str(c.group(1))+', '+str(c.group(2)))
+        log(LOG_WARN, 'found template for <use id="{}" ...>'.format(c.group(1)))
         map[c.group(1)] = c.group(2)
     cont = b'';
     #print("svg map: "+str(map))
@@ -806,7 +825,7 @@ def handleContentSVG(content): # replace <use href="#templID" ...> by content of
             href = m.group(3)
             x    = m.group(4)
             y    = m.group(5)
-            log(LOG_DEBUG, "use: {} href='{}'".format(str(id),str(href)))
+            log(LOG_WARN, "use: {} href='{}'".format(str(id),str(href)))
             cont += b'<g id="'+id+b'" transform="translate('+x+b','+y+b')">\n'+map[href]+b'\n</g>'
         else:
             cont += c
@@ -915,6 +934,8 @@ class RequestHandler(BaseHTTPRequestHandler):
             ( content, contentType ) = self.handleRequestRequest(path,{'win_id':None})
         elif '/request/sr_state.json' == path:
             ( content, contentType ) = self.handleRequestRequest(path)
+        elif '/request/sr_toggle.json' == path:
+            ( content, contentType ) = self.handleRequestRequest(path,{'bit':MANDATORY})
         elif '/request/window/action.json' == path:
             room = project.room
             data = {}
@@ -935,6 +956,23 @@ class RequestHandler(BaseHTTPRequestHandler):
                         if args['pos']   is not None: raise ValueError("parameter 'pos' specified"  )
                         if args['angle'] is not None: raise ValueError("parameter 'angle' specified")
                     room.pushEvent( DriveDirectionEvent(room,args) )
+                else:
+                    data['error' ] = "unknown action: '{}'".format(action)
+                    data['result'] = 1
+            except ValueError as e:
+                data['result'] = 1
+                data['error' ] = "error: '{}'".format(e)
+            content = json.dumps(data)
+            contentType = 'application/json'
+        elif '/request/sr_action.json' == path:
+            room = project.room
+            data = {}
+            try:
+                args = self.parameter_args({'action':MANDATORY,'bit':MANDATORY})
+                data['result'] = 0
+                if 'toggle' == args['action']:
+                    if args['bit'] is None: raise ValueError("parameter 'bit' missing")
+                    room.pushEvent( BitEvent(room,args) )
                 else:
                     data['error' ] = "unknown action: '{}'".format(action)
                     data['result'] = 1

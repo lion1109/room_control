@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN" "http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd">
-<svg version="1.2" _width="154mm" _height="85.9mm" width="308mm" height="171.8mm" viewBox="0 0 53000 26000" preserveAspectRatio="xMidYMid" fill-rule="evenodd" stroke-width="28.222" stroke-linejoin="round" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" xmlns:anim="urn:oasis:names:tc:opendocument:xmlns:animation:1.0" xml:space="preserve" onload="P_initialize(evt)" >
+<svg version="1.2" _width="154mm" _height="85.9mm" width="308mm" height="171.8mm" viewBox="0 0 53000 26000" preserveAspectRatio="xMidYMid" fill-rule="evenodd" stroke-width="28.222" stroke-linejoin="round" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" xmlns:anim="urn:oasis:names:tc:opendocument:xmlns:animation:1.0" xml:space="preserve" onload="ApplicationInitialize(evt)" style="background:black">
 
   <!--defs>
     <font id="EmbeddedFont_1">
@@ -16,6 +16,8 @@
     
     <style type="text/css">
       <![CDATA[
+
+    svg             { fill:rgb(0.0.0); }
     @font-face      { font-family: 'Liberation Sans embedded'; font-weight: normal;
                       font-style: italic;
                       src: url("fonts.svg#Font1") format("svg")
@@ -46,6 +48,13 @@
     <script type="text/javascript">
       <![CDATA[
 
+             var col_led_on  = 'rgb(255,0,0)';
+             var col_led_off = 'rgb(0,0,0)';
+             var col_led_hr  = 'rgb(183,214,255)';
+
+             var col_pressed = 'rgb(204,102,255)';
+             var col_button  = 'rgb(112,153,204)';
+	     
              var debug = false;
 
              function getSubnodeById(node,id) {
@@ -149,7 +158,7 @@
 	     P_Window.prototype.setOpenerState = function (state){ this.NameNode.children[1].textContent = name };
 	     P_Window.prototype.setOpenerPos   = function (pos)  { this.NameNode.children[1].textContent = name };
 
-             P_Window.prototype.serverReq   = function (reqType,param,hdl)  {
+             P_Window.prototype.serverReq = function (reqType,param,hdl)  {
                if ( null == hdl ) hdl = P_Window.resultHandler;
 	       serverRequest('/request/window/'+reqType+'.json?win_id='+this.id+param,hdl,this);
 	     };
@@ -160,8 +169,8 @@
 		 debugOutput( res.toString() );
 	       } else {
 		 debugOutput( res.toString() );
-	         if ( null != res.sr_status ) {
-		   
+	         if ( null != res.sr_state ) {
+		   SR_LEDs.result(res,null)
 	         }
 	       }	 
              };
@@ -209,28 +218,27 @@
 	       //alert( "NameNode: "+this.NameNode );
 	       this.setName(this.id);
 	     };
-	     P_Window.initialize2 = function (id,win_node) {
-	       p_win = P_Window.windows[id]
-	       p_win.init2(win_node);
-	       return p_win
+
+             P_Window.onuse = function (useNode,winNode) {
+	       var id = useNode.id
+	       if ( id != null && id.substr(0,4) == 'win_' ) {
+	         var wid = id.substr(4);
+		 //alert( "create: '"+wid+"', parent: "+getNodeDetails(useNode));
+		 new P_Window(wid);
+	       }
 	     };
 
-             function P_initialize (evt) {
+
+             function ApplicationInitialize (evt) {
                var eList = document.getElementsByTagName('g');
-	       //alert( "elements.length: "+eList.length )
 	       for ( var i = 0; i < eList.length; i++ ) {
-	         var e = eList[i];
-	         //alert( "e: "+e.id );
-                 if ( e.dataset.id == 'w_window' ) {
-		   var win = e;
-		   var use = win.parentNode;
-		   if ( use.id != null && use.id.substr(0,4) == 'win_' ) {
-		     var id = use.id.substr(4);
-		     //alert( "create: '"+id+"', parent: "+getNodeDetails(use));
-		     new P_Window(id);
-		   }
-                 }  
-               }  
+	         var node = eList[i];
+                 if ( null != node.dataset.onuse && 'g' == node.parentNode.nodeName ) {
+		   var useNode = node.parentNode;
+		   var f = eval(node.dataset.onuse)
+		   f(useNode,node)
+                 }
+	       }
 	     }
 
 
@@ -375,33 +383,95 @@
 	       debug = ! debug;
 	       rect  = document.getElementById('btn_debug_face'); // node.childNodes[1];
 	       //alert( "rect: "+rect );
-	       rect.style.fill = debug ? "rgb(204,102,255)" : "rgb(112,153,204)"
+	       rect.style.fill = debug ? col_pressed : col_button;
              }
 	       
 	     function toggle_mouse(on) {
 	       rect = document.getElementById('ind_mouse');
-	       rect.style.fill = on ? "rgb(204,102,255)" : "rgb(112,153,204)"
+	       rect.style.fill = on ? col_pressed : col_button;
              }
   
 	     function toggle_click(on) {
 	       rect = document.getElementById('ind_click');
-	       rect.style.fill = on ? "rgb(204,102,255)" : "rgb(112,153,204)"
+	       rect.style.fill = on ? col_pressed : col_button;
              }
 	       
 	     function toggle_drag(name,on) {
 	       rect = document.getElementById('ind_drag_'+name);
-	       rect.style.fill = on ? "rgb(204,102,255)" : "rgb(112,153,204)"
+	       rect.style.fill = on ? col_pressed : col_button;
              }
 	       
 	     function toggle_btn(name,on) {
 	       rect = document.getElementById('ind_btn_'+name);
-	       if ( on ) {
-	         rect.style.fill = "rgb(204,102,255)"
-	         setTimeout(function(){ toggle_btn(name,0); },300);
-	       } else {
-	         rect.style.fill = "rgb(112,153,204)"
-	       }
+	       rect.style.fill = on ? col_pressed : col_button;
+	       if ( on ) setTimeout(function(){ toggle_btn(name,0); },300);
              }
+
+
+	     function SR_LEDs() {
+             }
+	     SR_LEDs.onuse = function (useNode,node) {
+	       var n = parseInt(useNode.id.substr(10));
+	       var text = getSubnodeById(node,'text');
+	       var on   = getSubnodeById(node,'on');
+	       var dir  = getSubnodeById(node,'dir');
+	       on. setAttribute('onclick', "SR_LEDs.click("+n+",0,'on')" );
+	       dir.setAttribute('onclick', "SR_LEDs.click("+n+",1,'dir')");
+	       text.textContent = n*2;
+	     };
+	     SR_LEDs.click = function (motor,t,name) {
+	       var bit = motor * 2 + t
+	       if ( -1 == motor ) bit = -1
+               serverRequest('/request/sr_toggle.json?bit='+bit,SR_LEDs.result,null);
+	     };
+	     SR_LEDs.request = function () { 
+               serverRequest('/request/sr_state.json',SR_LEDs.result,null);
+	     };
+	     SR_LEDs.result = function (res,data) {
+	       if ( null == res ) {
+	         debugOutput( 'SR_LEDs.result handler error' );
+	       } else if ( res.result ) {
+		 debugOutput( res.toString() );
+	       } else if ( null == res.sr_state ) {
+		 debugOutput( 'missing sr_state in: '+res.toString() );
+	       } else {
+		 SR_LEDs.showOutput(res.sr_state);
+	       }
+	     };
+	     SR_LEDs.bitToNodeMap = {};
+	     SR_LEDs.getBitNode = function (bit) {
+	       var node = SR_LEDs.bitToNodeMap[bit]
+	       if (null != node ) return node;
+	       
+               var led   = ( bit & 1 ) ? 'dir' : 'on';
+               var motor = document.getElementById('win_motor_'+(bit>>1));
+	       return SR_LEDs.bitToNodeMap[bit] = getSubnodeById(motor,led);
+	     };
+	     SR_LEDs.showOutput = function (state,data) {
+	       document.getElementById('LED_enable').style.fill = state.enable ? col_led_on : col_led_off;
+
+               var bits = state.bits;
+	       if ( state.output ) {
+	         for ( var bitIdx = 0; bitIdx < bits; bitIdx++ ) {
+	           var byteVal = state.output[Math.floor(bitIdx/8)];
+	           var bitPos  = bitIdx % 8
+		   bitValue = ( byteVal & ( 1 << bitPos) ) ? 1 : 0;
+
+                   ledNode = SR_LEDs.getBitNode(bitIdx);
+		   ledNode.style.fill = bitValue ? col_led_on : col_led_off;
+	         }
+	       }   
+             };
+	     SR_LEDs.clickNode = function (node,bit) {
+	       //var bit 
+	       
+             };
+	     SR_LEDs.thread = function () {
+               SR_LEDs.request()
+               setTimeout(SR_LEDs.thread,2000);
+             };
+	     SR_LEDs.thread();
+	       
       ]]>
     </script>
 
@@ -426,15 +496,15 @@
     </mask>
 
     <!-- start template="w_led" -->
-    <g data-id="w_led">
-      <text class="LED" x="100" y="500">.</text>
-      <circle data-id="on"  class="LED" cx="200" cy="900"  r="200"/>
-      <circle data-id="dir" class="LED" cx="200" cy="1400" r="200"/>
+    <g data-id="w_led" data-onuse="SR_LEDs.onuse">
+      <text data-id="text" class="LED" x="100" y="370">.</text>
+      <circle data-id="on"  class="LED" cx="1000" cy="200" r="200"/>
+      <circle data-id="dir" class="LED" cx="1500" cy="200" r="200"/>
     </g>
     <!-- end template="w_led" -->
 
     <!-- start template="w_window" -->
-    <g data-id="w_window">
+    <g data-id="w_window" data-onuse="P_Window.onuse">
     
       <g data-id="w_name" transform="translate(0,0)" onmousedown="P_Window.mouseEvent(this,0,1)" onmouseup="P_Window.mouseEvent(this,0,0)">
 	<rect class="Name" x="0" y="0" width="3000" height="2600"/>
@@ -490,13 +560,13 @@
 
   </defs>
 
-  <use id="win_L1" href="#w_window" x="500"   y="500"/>
-  <use id="win_L2" href="#w_window" x="13500" y="500"/>
-  <use id="win_L3" href="#w_window" x="26500" y="500"/>
-  <use id="win_L4" href="#w_window" x="39500" y="500"/>
+  <use id="win_L4" href="#w_window" x="500"   y="500"/>
+  <use id="win_L3" href="#w_window" x="13500" y="500"/>
+  <use id="win_L2" href="#w_window" x="26500" y="500"/>
+  <use id="win_L1" href="#w_window" x="39500" y="500"/>
   
-  <use id="win_R1" href="#w_window" x="500"   y="13000"/>
-  <use id="win_R4" href="#w_window" x="39500" y="13000"/>
+  <use id="win_R4" href="#w_window" x="500"   y="13000"/>
+  <use id="win_R1" href="#w_window" x="39500" y="13000"/>
 
   <g transform="translate(13500,13000)" onclick="toggle_debug(this)">
     <rect id="btn_debug_face" class="Button" x="0" y="0" width="3000" height="1800"/>
@@ -560,28 +630,35 @@
     <text class="Button" x="500" y="1400">move</text>
   </g>
 
-
+<!--
   <g transform="translate(22800,13000)">
     <rect class="Text" x="0" y="0" width="15000" height="1800"/>
     <text id="dbg_output" class="DbgOut" x="300" y="1400">.</text>
   </g>
+-->
+
+  <g transform="translate(500,0)">
+    <rect class="Text" x="0" y="-500" width="30000" height="700"/>
+    <text id="dbg_output" class="DbgOut" x="200" y="0">.</text>
+  </g>
 
   <g transform="translate(22800,14900)">
-    <rect class="Text" x="0" y="0" width="15000" height="1800"/>
-    <circle id="LED_enable" class="LED" cx="300" cy="400" r="200"/>
+    <rect class="Text" x="0" y="0" width="1900" height="6900"/>
+    <circle id="LED_enable" class="LED" cx="300" cy="300" r="200" onclick="SR_LEDs.click(-1,-1,'enable')"/>
+    <text class="LED" x="800" y="400">en</text>
 
-    <use id="win_led_0" href="#w_led" x="600"  y="0"/>
-    <use id="win_led_1" href="#w_led" x="1100" y="0"/>
-    <use id="win_led_2" href="#w_led" x="1600" y="0"/>
-    <use id="win_led_3" href="#w_led" x="2100" y="0"/>
-    <use id="win_led_4" href="#w_led" x="2600" y="0"/>
-    <use id="win_led_5" href="#w_led" x="3100" y="0"/>
-    <use id="win_led_6" href="#w_led" x="3600" y="0"/>
-    <use id="win_led_7" href="#w_led" x="4100" y="0"/>
-    <use id="win_led_8" href="#w_led" x="4600" y="0"/>
-    <use id="win_led_9" href="#w_led" x="5100" y="0"/>
-    <use id="win_led_10" href="#w_led" x="5600" y="0"/>
-    <use id="win_led_11" href="#w_led" x="6100" y="0"/>
+    <use id="win_motor_0"  href="#w_led" x="0" y="700"/>
+    <use id="win_motor_1"  href="#w_led" x="0" y="1200"/>
+    <use id="win_motor_2"  href="#w_led" x="0" y="1700"/>
+    <use id="win_motor_3"  href="#w_led" x="0" y="2200"/>
+    <use id="win_motor_4"  href="#w_led" x="0" y="2700"/>
+    <use id="win_motor_5"  href="#w_led" x="0" y="3200"/>
+    <use id="win_motor_6"  href="#w_led" x="0" y="3700"/>
+    <use id="win_motor_7"  href="#w_led" x="0" y="4200"/>
+    <use id="win_motor_8"  href="#w_led" x="0" y="4700"/>
+    <use id="win_motor_9"  href="#w_led" x="0" y="5200"/>
+    <use id="win_motor_10" href="#w_led" x="0" y="5700"/>
+    <use id="win_motor_11" href="#w_led" x="0" y="6200"/>
   </g>
 
 </svg>
