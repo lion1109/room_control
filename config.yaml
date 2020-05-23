@@ -56,58 +56,58 @@ room:
       on_bit:  0
       dir_bit: 1
     blind:
-      on_bit:  3
-      dir_bit: 4
+      on_bit:  2
+      dir_bit: 3
 
   window_1:
     id:             L2
     name:           "links 2 (2. von vorne)"
     opener:
-      on_bit:  5
-      dir_bit: 6
+      on_bit:  4
+      dir_bit: 5
     blind:
-      on_bit:  7
-      dir_bit: 8
+      on_bit:  6
+      dir_bit: 7
       
   window_2:
     id:             L3
     name:           "links 3 (3. von vorne)"
     opener:
-      on_bit:   9
-      dir_bit: 10
+      on_bit:   8
+      dir_bit:  9
     blind:
-      on_bit:  11
-      dir_bit: 12
+      on_bit:  10
+      dir_bit: 11
       
   window_3:
     id:             L4
     name:           "links hinten (4. und 5. von vorne)"
     opener:
-      on_bit:  13
-      dir_bit: 14
+      on_bit:  12
+      dir_bit: 13
     blind:
-      on_bit:  15
-      dir_bit: 16
+      on_bit:  14
+      dir_bit: 15
 
   window_4:
     id:             R1
     name:           "rechts vorne (1. und 2. von vorne)"
     opener:
-      on_bit:  17
-      dir_bit: 18
+      on_bit:  16
+      dir_bit: 17
     blind:
-      on_bit:  19
-      dir_bit: 20
+      on_bit:  18
+      dir_bit: 19
     
   window_5:
     id:             R4
     name:           "rechts hinten (3. und 4. von vorne)"
     opener:
-      on_bit:  21
-      dir_bit: 22
+      on_bit:  20
+      dir_bit: 21
     blind:
-      on_bit:  23
-      dir_bit: 24
+      on_bit:  22
+      dir_bit: 23
 
   dimmer:
     count: 1

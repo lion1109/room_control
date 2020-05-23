@@ -83,7 +83,7 @@
 		     else
 		       debugOutput( text );
 		   } catch(err) {
-		     alert(err+', response: '+text);
+		     alert(err+'\nresponse: '+text+'\nurl: '+url);
 		   }
                    //alert("result: "+jsonObj.result);
 	         }
@@ -422,7 +422,7 @@
 	     SR_LEDs.click = function (motor,t,name) {
 	       var bit = motor * 2 + t
 	       if ( -1 == motor ) bit = -1
-               serverRequest('/request/sr_toggle.json?bit='+bit,SR_LEDs.result,null);
+               serverRequest('/request/sr/action.json?action=toggle_bit&bit='+bit,SR_LEDs.result,null);
 	     };
 	     SR_LEDs.request = function () { 
                serverRequest('/request/sr_state.json',SR_LEDs.result,null);
@@ -629,13 +629,6 @@
     <rect id="ind_btn_move" class="Button" x="0" y="0" width="3000" height="1800"/>
     <text class="Button" x="500" y="1400">move</text>
   </g>
-
-<!--
-  <g transform="translate(22800,13000)">
-    <rect class="Text" x="0" y="0" width="15000" height="1800"/>
-    <text id="dbg_output" class="DbgOut" x="300" y="1400">.</text>
-  </g>
--->
 
   <g transform="translate(500,0)">
     <rect class="Text" x="0" y="-500" width="30000" height="700"/>

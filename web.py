@@ -48,7 +48,7 @@ LOG_ERROR    = 1
 LOG_WARN     = 2 
 LOG_DEBUG    = 3 
 LOG_CALL     = 4
-currentLogLevel = LOG_WARN
+currentLogLevel = LOG_CALL
 def log(level,msg):
     if level <= currentLogLevel:
         #rint(msg,file=sys.stderr)
@@ -103,9 +103,76 @@ class Config:
 
 
     def isExisting(self):
-        return self.dict is not None 
+        return self.dict is not None
+
+
+
+import copy
+
+class Bitset:
+
+    def __init__(self,bits):
+        self.bits = bits
+        self.clear()
+
+
+    def clear(self):
+        self.data = [ 0 for i in range(0,self.bits) ]
+
+
+    def copy(self):
+        return copy.deepcopy(self)
+
+
+    def set(self,idx,bit=1):
+        if not isinstance(idx,int):
+            raise ValueError('idx must be a int value')
+        if not isinstance(idx,int) or idx < 0 or idx >= self.bits:
+            raise IndexRangeError('idx out of range error')
+        v = 1 if bit else 0
+        print( "old: idx {}, old_val:{}, new_val:{}".format(idx,self.data[idx],v) )
+        #self.data[idx] = v # 1 if bit else 0
+        self.data[idx] = ( 1 if bit else 0 )
+        print( "new: idx {}, new_val:{}".format(idx,self.data[idx]) )
+        
+
+    def get(self,idx):
+        if not isinstance(idx,int):
+            raise ValueError('idx must be a int value')
+        if not isinstance(idx,int) or idx < 0 or idx >= self.bits:
+            raise IndexRangeError('idx out of range error [0,{}]'.format(self.bits))
+        return self.data[idx]
 
     
+    def toByteArray(self):
+        a = []
+        byteIdxMax = int((self.bits+7)/8)
+        for byteIdx in range(0,byteIdxMax):
+            b = 0;
+            for bitIdx in range(0,8):
+                idx = byteIdx * 8 + bitIdx
+                if idx >= self.bits:
+                    a.append(b)
+                    return a
+                if self.get(idx):
+                    b |= 1 << bitIdx
+            a.append(b)
+        return a
+
+    
+    def __str__(self):
+        return self.toByteArray()
+
+
+    
+class ProjectEncoder(json.JSONEncoder):
+    def default(self, obj):
+        if isinstance(obj, Bitset):
+            return obj.toByteArray()
+        # Let the base class default method raise the TypeError
+        return json.JSONEncoder.default(self, obj)
+
+        
     
 class ShiftRegister: # 74HC595
 
@@ -114,9 +181,7 @@ class ShiftRegister: # 74HC595
         self.pinCLOCK  = pinCLOCK
         self.pinLATCH  = pinLATCH
         self.pinENABLE = pinENABLE
-        self.bitsCnt   = bits
-        self.bytesCnt  = int( (bits+7) / 8 )
-        self.byteArray = [ 0x00 for i in range(0,self.bytesCnt) ]
+        self.bitset    = Bitset(bits)
         self.dirty     = True
         self.enabled   = None
         self.output    = None
@@ -137,52 +202,32 @@ class ShiftRegister: # 74HC595
 
 
     def clearBits(self):
-        self.byteArray = [ 0x00 for i in range(0,bytesCnt) ] 
+        self.bitset.clear()
         self.dirty = True
 
 
-    def getBit(self,idx):
-        if not isinstance(idx,int):
-            raise ValueError('idx must be a int value')
-        if not isinstance(idx,int) or idx < 0 or idx >= self.bitsCnt:
-            raise IndexRangeError('idx out of range error')
-        byteIdx = int(idx/8)
-        bitIdx  = idx - byteIdx * 8
-        return ( self.byteArray[byteIdx] >> bitIdx ) & 0x01
+    def getOutputBit(self,idx):
+        return self.bitset.get(idx)
 
     
     def setBit(self,idx,value=1):
-        if not isinstance(idx,int):
-            raise ValueError('idx must be a int value')
-        if not isinstance(idx,int) or idx < 0 or idx >= self.bitsCnt:
-            raise IndexRangeError('idx out of range error')
-        byteIdx = int(idx/8)
-        bitIdx  = idx - byteIdx * 8
-        if value:
-            self.byteArray[byteIdx] |= (0x01 << bitIdx)
-        else:
-            self.byteArray[byteIdx] &= ~(0x01 << bitIdx)
+        self.bitset.set(idx,value)
         self.dirty = True
 
         
     def latch(self): # shift all bits into register and latch
         if not self.dirty: return
         GPIO.output(self.pinLATCH, GPIO.LOW)
-        byteIdxLast = self.bytesCnt - 1
-        bitsCntLast = self.bitsCnt % 8
-        for byteIdx in range(0, self.bytesCnt):
-            byteVal = self.byteArray[byteIdx]
-            bitsCnt = bitsCntLast if byteIdx == byteIdxLast else 8
-            for bitIdx in range(0,bitsCnt):
-                self.shiftBit( ( byteVal >> bitIdx) & 0x01 )
+        for idx in range(0, self.bitset.bits):
+            self.shiftBit( self.bitset.get(idx) )
         # GPIO.output(self.pinLATCH, GPIO.LOW)
         # time.sleep(0.001) # sleep to assure falling edge detected
         GPIO.output(self.pinLATCH, GPIO.HIGH)
         # time.sleep(0.001) # sleep to assure data latched
         self.dirty = False
-        self.output = self.byteArray
+        self.output = self.bitset.copy()
 
-        
+
     def enable(self,bit=1):
         self.enabled = bit and 1 or 0
         GPIO.output(self.pinENABLE, bit and GPIO.HIGH or GPIO.LOW)
@@ -190,7 +235,7 @@ class ShiftRegister: # 74HC595
         
     def getState(self):
         return  { 'enable': self.enabled,
-                  'bits':   self.bitsCnt,
+                  'bits':   self.bitset.bits,
                   'output': self.output
                 }
 
@@ -296,7 +341,7 @@ class Motor:
                 dir = 1;
             else:
                 p = ( self.hard_pos - self.hard_pos_min ) / ( self.hard_pos_max - self.hard_pos_min )
-                dir = 1 if p < 0.5 else 0
+                dir = ( 1 if p < 0.5 else 0 )
         if 1 == dir:
             self.hard_pos_back = 0
             self.hard_pos      = self.hard_pos_max
@@ -356,7 +401,7 @@ class Motor:
     def _stopMotor(self):
         print("_stopMotor({}), {}, {}, {}, {}".format(dir,self.bitDir,self.bitOn, self.hard_pos, self.hard_pos_back))
         sr = self.room.shift_register
-        sr.setBit(self.bitDir,dir)
+        sr.setBit(self.bitDir,0)
         sr.setBit(self.bitOn,0)
         sr.latch()
         self._calcHardPos() # calculate when switching the motor off 
@@ -386,7 +431,7 @@ class Motor:
             d_pos = self.drive_to_pos_back - self.hard_pos_back
             print("d_pos: {}, d_pos_max_back = {}".format(d_pos, self.d_pos_back_max))
             if abs(d_pos) > self.d_pos_back_max:
-                return self.DIR_BACKWARD1 if self.hard_pos_back < self.drive_to_pos_back else self.DIR_FORWARD
+                return self.DIR_BACKWARD if self.hard_pos_back < self.drive_to_pos_back else self.DIR_FORWARD
             else:
                 dir = self.STOP_MOTOR
 
@@ -573,25 +618,47 @@ class RoomEvent:
         
     def isWaiting(self): return False
 
+
+
+class SR_Event (RoomEvent):
+
+    def __init__(self,room,args):
+        super().__init__(room,args)
+        self.action = args.pop('action')
+        self.bit    = int(args.pop('bit'))
+        if 'toggle_bit' != self.action: raise ValueError('unknown sr action: '+self.action)
         
+
+    def handle(self,room):
+        print( "\nSR_Event.handle() toggle bit {}".format(self.bit) )
+        sr  = self.room.shift_register
+        bit = self.bit
+        if -1 == bit:
+            sr.enable( 0 if sr.enabled else 1 )
+        else:
+            b = sr.getOutputBit(bit)
+            sr.setBit(bit, 0 if b else 1 )
+            sr.latch()
+        return { 'result': 0, 'sr_state': sr.getState() }
+
+    
+
 class WindowEvent (RoomEvent):
 
     def __init__(self,room,args):
         super().__init__(room,args)
-        #print( "WindowEvent( {}, {} ), room.windows: {}".format(room,args,str(room.windows)) )
         self.window = room.windows[args.pop('win_id')]
 
 
     def isWaiting(self):
         return False
-
     
-        
+    
+    
 class MotorEvent (WindowEvent):
 
     def __init__(self,room,args):
         super().__init__(room,args)
-        #print( "MotorEvent( {}, {} ), room.windows: {}".format(room,args,str(room.windows)) )
         if   'opener' == args['motor']: self.motor = self.window.opener
         elif 'blind'  == args['motor']: self.motor = self.window.blind
         else: raise ValueError("illegal motor parameter '{}'".format(args[motor]))
@@ -632,16 +699,14 @@ class DriveDirectionEvent (MotorEvent):
     def __init__(self,room,args):
         
         super().__init__(room,args)
-        self.stop      = args['stop'] == '1'
+        self.stop  = ( '1' == args['stop'] )
         if not self.stop:
             self.direction = int(args['dir'])
-            #print("DriveDirectionEvent(): dir: "+str(self.direction))
             if self.direction != 0 and self.direction != 1:
                 raise ValueError('dir {} must be 0 or 1')        
 
     def handle(self,room):
-        dir = -1 if self.stop else self.direction
-        print( "SetPositionEvent() {}".format(dir) )
+        log(LOG_DEBUG, "handle SetPositionEvent()")
         self.motor.driveInDirection(-1 if self.stop else self.direction)
 
 
@@ -738,15 +803,6 @@ class Room:
 
     def doRequest(self,action,args):
         if 'sr_state' == action:
-            return { 'result': 0, 'sr_state':   self.shift_register.getState() }
-        if 'sr_toggle' == action:
-            sr  = self.shift_register;
-            bit = int(args['bit'])
-            if -1 == bit:
-                sr.enable( 0 if sr.enabled else 1 )
-            else:
-                b = sr.getBit(bit)
-                self.shift_register.setBit( 0 if b else 1 )
             return { 'result': 0, 'sr_state':   self.shift_register.getState() }
         if 'window/config' == action:
             window = self.windows[args['win_id']]
@@ -889,7 +945,7 @@ class RequestHandler(BaseHTTPRequestHandler):
         param = {}
         if defaults is not None:
             for k in defaults:
-                log(LOG_WARN, "k: '{}' of: {}".format(k,defaults))
+                #log(LOG_DEBUG, "k: '{}' of: {}".format(k,defaults))
                 default = defaults[k]
                 value   = self.parameter_value(k,default);
                 if MANDATORY == value:
@@ -911,7 +967,7 @@ class RequestHandler(BaseHTTPRequestHandler):
                 data = project.room.doRequest(req,param)
         except ValueError as err:
             data = { 'result': 1, 'error': str(err) }
-        content = json.dumps(data)
+        content = json.dumps(data,cls=ProjectEncoder)
         contentType = 'application/json'
         return ( content, contentType )
 
@@ -934,8 +990,22 @@ class RequestHandler(BaseHTTPRequestHandler):
             ( content, contentType ) = self.handleRequestRequest(path,{'win_id':None})
         elif '/request/sr_state.json' == path:
             ( content, contentType ) = self.handleRequestRequest(path)
-        elif '/request/sr_toggle.json' == path:
-            ( content, contentType ) = self.handleRequestRequest(path,{'bit':MANDATORY})
+        elif '/request/sr/action.json' == path:
+            room = project.room
+            data = {}
+            try:
+                args = self.parameter_args({'action':MANDATORY,'bit':MANDATORY})
+                data['result'] = 0
+                if 'toggle_bit' == args['action']:
+                    room.pushEvent( SR_Event(room,args) )
+                else:
+                    data['error' ] = "unknown action: '{}'".format(action)
+                    data['result'] = 1
+            except ValueError as e:
+                data['result'] = 1
+                data['error' ] = "error: '{}'".format(e)
+            content = json.dumps(data,cls=ProjectEncoder)
+            contentType = 'application/json'
         elif '/request/window/action.json' == path:
             room = project.room
             data = {}
@@ -962,7 +1032,7 @@ class RequestHandler(BaseHTTPRequestHandler):
             except ValueError as e:
                 data['result'] = 1
                 data['error' ] = "error: '{}'".format(e)
-            content = json.dumps(data)
+            content = json.dumps(data,cls=ProjectEncoder)
             contentType = 'application/json'
         elif '/request/sr_action.json' == path:
             room = project.room
@@ -979,7 +1049,7 @@ class RequestHandler(BaseHTTPRequestHandler):
             except ValueError as e:
                 data['result'] = 1
                 data['error' ] = "error: '{}'".format(e)
-            content = json.dumps(data)
+            content = json.dumps(data,cls=ProjectEncoder)
             contentType = 'application/json'
         elif '/' == path:
             content = '<html><head><meta http-equiv="Content-Type" content="text/html; charset=utf-8"/><title>Room Control</title></head><body>Room Control</body></html>'
