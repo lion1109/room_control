@@ -172,11 +172,22 @@ class ProjectEncoder(json.JSONEncoder):
     
 class ShiftRegister: # 74HC595
 
-    def __init__(self,pinDATA,pinCLOCK,pinLATCH,pinENABLE,bits=8):
+    outLevel_LOW_HIGH = [ GPIO.LOW, GPIO.HIGH ]
+    outLevel_HIGH_LOW = [ GPIO.HIGH, GPIO.LOW ]
+
+    def __init__(self,pinDATA,pinCLOCK,pinLATCH,pinENABLE,bits=8,enableLevel='HIGH',dataLevel='HIGH',setupTime=0,holdTime=0):
         self.pinDATA   = pinDATA
         self.pinCLOCK  = pinCLOCK
         self.pinLATCH  = pinLATCH
         self.pinENABLE = pinENABLE
+
+        if enableLevel != 'HIGH' and enableLevel != 'LOW': raise ValueError( 'enableLevel must be HIGH or LOW' )
+        if dataLevel   != 'HIGH' and dataLevel   != 'LOW': raise ValueError( 'dataLevel   must be HIGH or LOW' )
+        self.enableLevel = ( self.outLevel_LOW_HIGH if enableLevel == 'HIGH' else self.outLevel_HIGH_LOW )
+        self.dataLevel   = ( self.outLevel_LOW_HIGH if dataLevel   == 'HIGH' else self.outLevel_HIGH_LOW )
+        self.setupTime   = setupTime
+        self.holdTime    = holdTime
+        
         self.bitset    = Bitset(bits)
         self.dirty     = True
         self.enabled   = None
@@ -185,10 +196,12 @@ class ShiftRegister: # 74HC595
         
     def shiftBit(self,bit=0):
         GPIO.output(self.pinCLOCK, GPIO.LOW)
-        GPIO.output(self.pinDATA,  bit and GPIO.HIGH or GPIO.LOW)
-        # time.sleep(0.001) # sleep to assure data valid
+        GPIO.output(self.pinDATA,  self.dataLevel[bit and 1 or 0])
+        if self.setupTime:
+            time.sleep(self.setupTime) # sleep to assure data valid
         GPIO.output(self.pinCLOCK, GPIO.HIGH)
-        # time.sleep(0.001) # sleep to assure data read
+        if self.holdTime:
+            time.sleep(self.holdTime) # sleep to assure data valid
 
                 
     def clearRegister(self):
@@ -216,17 +229,15 @@ class ShiftRegister: # 74HC595
         GPIO.output(self.pinLATCH, GPIO.LOW)
         for idx in range(0, self.bitset.bits):
             self.shiftBit( self.bitset.get(idx) )
-        # GPIO.output(self.pinLATCH, GPIO.LOW)
-        # time.sleep(0.001) # sleep to assure falling edge detected
         GPIO.output(self.pinLATCH, GPIO.HIGH)
-        # time.sleep(0.001) # sleep to assure data latched
+        #if self.holdTime: time.sleep(self.holdTime) # sleep to assure data latched
         self.dirty = False
         self.output = self.bitset.copy()
 
 
     def enable(self,bit=1):
         self.enabled = bit and 1 or 0
-        GPIO.output(self.pinENABLE, bit and GPIO.HIGH or GPIO.LOW)
+        GPIO.output( self.pinENABLE, self.enableLevel[self.enabled] )
 
         
     def getState(self):
@@ -728,16 +739,21 @@ class Room:
 
         
     def init_shift_register(self):
-        pinDATA   = self.config.get('shift_register.pinDATA')
-        pinCLOCK  = self.config.get('shift_register.pinCLOCK')
-        pinLATCH  = self.config.get('shift_register.pinLATCH')
-        pinENABLE = self.config.get('shift_register.pinENABLE')
+        pinDATA     = self.config.get('shift_register.pinDATA')
+        pinCLOCK    = self.config.get('shift_register.pinCLOCK')
+        pinLATCH    = self.config.get('shift_register.pinLATCH')
+        pinENABLE   = self.config.get('shift_register.pinENABLE')
+        bits        = self.config.get('shift_register.bits',16)
+        enableLevel = self.config.get('shift_register.enableLevel','HIGH')
+        dataLevel   = self.config.get('shift_register.dataLevel',  'HIGH')
+        setupTime   = float(self.config.get('shift_register.setupTime','0'))
+        holdTime    = float(self.config.get('shift_register.holdTime', '0'))
         GPIO.setmode(GPIO.BOARD)        # Number GPIOs by its physical location
         GPIO.setup(pinDATA,   GPIO.OUT)
         GPIO.setup(pinCLOCK,  GPIO.OUT)
         GPIO.setup(pinLATCH,  GPIO.OUT)
         GPIO.setup(pinENABLE, GPIO.OUT)
-        self.shift_register = ShiftRegister(pinDATA, pinCLOCK, pinLATCH, pinENABLE, 3*8)
+        self.shift_register = ShiftRegister(pinDATA, pinCLOCK, pinLATCH, pinENABLE, bits=bits, enableLevel=enableLevel, dataLevel=dataLevel, setupTime=setupTime, holdTime=holdTime)
 
 
     def init_windows(self):

@@ -16,11 +16,15 @@ web:
 room:
 
   shift_register:      # hardware configuration
-    pinDATA:    7      # pin  7 = GPIO4 
+    pinDATA:    7      # pin  7 = GPIO4
     pinCLOCK:  11      # pin 11 = GPIO17
     pinLATCH:  13      # pin 13 = GPIO27
     pinENABLE: 15      # pin 15 = GPIO22
-    bits:      24      # number of bits in the shift register
+    bits:      48      # number of bits in the shift register, default is 16
+    enabledLevel: HIGH # level of enable pin if enabled HIGH or LOW, default is HIGH
+    dataLevel:    HIGH # level of data pin for a 1, HIGH or LOW, default is HIGH
+    setupTime:       0 # time in seconds need to set up the data signal before clock rising edge
+    holdTime:        0 # time in seconds need to hold the data signal after clock rising edge
 
   defaults:            # defaults for the room window configuration
     opener:            # window opener data
