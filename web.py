@@ -129,11 +129,7 @@ class Bitset:
             raise ValueError('idx must be a int value')
         if not isinstance(idx,int) or idx < 0 or idx >= self.bits:
             raise IndexRangeError('idx out of range error')
-        v = 1 if bit else 0
-        print( "old: idx {}, old_val:{}, new_val:{}".format(idx,self.data[idx],v) )
-        #self.data[idx] = v # 1 if bit else 0
         self.data[idx] = ( 1 if bit else 0 )
-        print( "new: idx {}, new_val:{}".format(idx,self.data[idx]) )
         
 
     def get(self,idx):
@@ -960,7 +956,7 @@ class RequestHandler(BaseHTTPRequestHandler):
         project = self.server.project
         try:
             param = self.parameter_args(params)
-            print("req: '{}, param: {}'".format(req,param))
+            #print("req: '{}, param: {}'".format(req,param))
             if 'config' == req:
                 data = { 'result': 0, 'config': project.getConfig() }
             else:
@@ -980,7 +976,7 @@ class RequestHandler(BaseHTTPRequestHandler):
         contentType = None #'text/html'
         parsed_path = self.get_parsed_path()
         path = parsed_path['path']
-        print( "parsed_path: "+str(parsed_path))
+        #print( "parsed_path: "+str(parsed_path))
         if '/' == path: path = '/index.html'
         if '/request/config.json' == path:
             ( content, contentType ) = self.handleRequestRequest(path)

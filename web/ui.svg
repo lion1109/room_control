@@ -95,14 +95,16 @@
 
 
              function Motor(id,coord,node) {
-               this.id         = id;
-               this.coord      = coord;
-               this.node       = node;
+               this.id         = id;    // 'opener_' or 'blind_' or 'slat_' + win.id
+               this.coord      = coord; // variable coordinate: 'x' for opener or 'y' for blinds
+               this.node       = node;  // <g>-tag node 
+	       
                this.pos_min    =   0;
                this.pos_max    = 100;
-               this.position   =  50;
-               this.currentPos =  70;
-               this.state      =   0; // flags: 1 = pos valid, 2 = active, 4 = backward 
+	       
+               this.position     =  50;
+               this.currentPos   =  70;
+               this.state        =   0; // flags: 1 = pos valid, 2 = active, 4 = backward 
 	     }
 	     Motor.minPosPixel = 0;
 	     Motor.maxPosPixel = 9400 - 1100;
@@ -150,7 +152,16 @@
 	       this.init2(node.childNodes[1]) // simple access due to use-tag replaced by the template tree
 	       //alert( "window "+id+" constructed, name: "+this.NameNode );
                this.opener = new Motor('opener_'+id,'x',this.getSubNode('opener'));
-               this.shadow = new Motor('shadow_'+id,'y',this.getSubNode('shadow'));
+               this.blind  = new Motor('blind_'+id, 'y',this.getSubNode('blind' ));
+               this.slat   = new Motor('slat_'+id,  'x',this.getSubNode('slat'  ));
+
+               var buttons = [ 'w_name', 'w_btn_c', 'w_btn_o', 'w_btn_r', 'w_btn_l' ];
+	       for (var i = 1; i < buttons.length; i++) {
+	         var button = getSubnodeById(node,buttons[i]);
+	         button.setAttribute('onmousedown', "P_Window.mouseEvent(this,"+i+",1)");
+	         button.setAttribute('onmouseup',   "P_Window.mouseEvent(this,"+i+",0)");
+	         button.setAttribute('onmouseout',  "P_Window.mouseEvent(this,"+i+",2)");
+	       }
              }
 	     P_Window.windows = {};
 	     P_Window.prototype.getSubNode     = function (id)   { return getSubnodeById( this.WinNode, id );   };
@@ -176,23 +187,14 @@
              };
 	     P_Window.prototype.buttonClick       = function (nr)   {
 	       if        ( 1 == nr || 2 == nr ) {
-	         var pos = nr == 1 ? 0 : 100
+	         var pos   = nr == 1 ? this.opener.pos_min : this.opener.pos_max
 	         this.serverReq('action','&action=set_position&motor=opener&pos='+pos);
 	       } else if ( 3 == nr || 4 == nr ) {
-	         var pos = nr == 3 ? 0 : 100
-	         var angle = pos;
+	         var pos   = nr == 3 ? this.blind.pos_min : this.blind.pos_max;
+	         var angle = nr == 3 ? this.slat.pos_max  : this.slat.pos_min;
 	         this.serverReq('action','&action=set_position&motor=blind&pos='+pos+'&angle='+angle);
 	       }
              };
-	     P_Window.prototype.buttonClick2 = function (nr)   {
-	       //this.serverReq('&action='+nr);
-	       if ( nr == 5 || nr == 6 ) {
-	         motor = ( nr == 5 ) ? this.opener : this.shadow;
-	         pos = motor.position;
-		 motor.setPosition( motor.position + 5 );
-		 motor.setCurrentPositionAndState( motor.currentPos + 3, 3 + (motor.currentPos % 2) << 2 );
-	       }
-	     };
 	     P_Window.prototype.buttonPress = function (nr)   {
 	       if        ( 1 == nr || 2 == nr ) {
 	         var dir = nr == 1 ? 1 : 0
@@ -243,12 +245,13 @@
 
 
              P_Window.mouseEvent = function (node,nr,t) {
-	       var dt = 200; // time between down and up for a click
-	       if ( t == 1 ) { // mouse down
+               if ( 2 == t && null == P_Window.mouseEvent.data ) return;
+               var dt = 200; // time between down and up for a click
+	       if ( 1 == t ) { // mouse down
 	         P_Window.mouseEvent.data = { 'node': node, 'date': Date.now() };
-	         P_Window.mouseEvent.data.timeoutID = setTimeout( function () { P_Window.mouseEvent( node, nr, 2 ) }, dt );
-	       } else if ( t == 0 ) { // mouse up
-	         if ( node == P_Window.mouseEvent.data.node ) {
+	         P_Window.mouseEvent.data.timeoutID = setTimeout( function () { P_Window.mouseEvent( node, nr, 9 ) }, dt );
+	       } else if ( 0 == t || 2 == t ) { // mouse up or mouse out
+	         if ( null != P_Window.mouseEvent.data && node == P_Window.mouseEvent.data.node ) {
 		   data = P_Window.mouseEvent.data; P_Window.mouseEvent.data = null;
 		   clearTimeout(data.timeoutID);
 		   pWin = getWindow(node)
@@ -260,7 +263,7 @@
 		     pWin.buttonRelease(nr);
 		   }
 	         }
-	       } else if ( t == 2 ) {
+	       } else if ( t == 9 ) {
 	         data = P_Window.mouseEvent.data;
 	         if ( data != null && data.node == node ) {
 		   data.btnPressed = 1
@@ -506,27 +509,27 @@
     <!-- start template="w_window" -->
     <g data-id="w_window" data-onuse="P_Window.onuse">
     
-      <g data-id="w_name" transform="translate(0,0)" onmousedown="P_Window.mouseEvent(this,0,1)" onmouseup="P_Window.mouseEvent(this,0,0)">
+      <g data-id="w_name" transform="translate(0,0)">
 	<rect class="Name" x="0" y="0" width="3000" height="2600"/>
 	<text class="Name" x="300" y="1900">.</text>
       </g>
     
-      <g data-id="w_btn_c" transform="translate(3000,0)" onmousedown="P_Window.mouseEvent(this,1,1)" onmouseup="P_Window.mouseEvent(this,1,0)">
+      <g data-id="w_btn_c" transform="translate(3000,0)">
 	<rect class="Button" x="0" y="0" width="4700" height="2600"/>
 	<text class="Button" x="1614" y="1486">close</text>
       </g>
 
-      <g data-id="w_btn_o" transform="translate(7700,0)" onmousedown="P_Window.mouseEvent(this,2,1)" onmouseup="P_Window.mouseEvent(this,2,0)">
+      <g data-id="w_btn_o" transform="translate(7700,0)">
 	<rect class="Button" x="0" y="0" width="4700" height="2600"/>
 	<text class="Button" x="1614" y="1486">open</text>
       </g>
     
-      <g data-id="w_btn_r" transform="translate(0,2600)" onmousedown="P_Window.mouseEvent(this,3,1)" onmouseup="P_Window.mouseEvent(this,3,0)">
+      <g data-id="w_btn_r" transform="translate(0,2600)">
 	<rect class="Button" x="0" y="0" width="3000" height="4700"/>
 	<text class="Button" x="700" y="2500">raise</text>
       </g>
     
-      <g data-id="w_btn_l" transform="translate(0,7300)" onmousedown="P_Window.mouseEvent(this,4,1)" onmouseup="P_Window.mouseEvent(this,4,0)">
+      <g data-id="w_btn_l" transform="translate(0,7300)">
 	<rect class="Button" x="0" y="0" width="3000" height="4700"/>
 	<text class="Button" x="700" y="2500">lower</text>
       </g>
@@ -536,7 +539,9 @@
 	<path style="fill:url(#gradient_v)" d="M 0,0 L 0,9400 9400,9400 Z"/>
 
 	<g data-id="opener" style="mask:url(#mask_h)">
-	  <rect data-id="bar" class="BarStatic" x="300" y="0" width="1100" height="9400" onmousedown="P_Window.mouseEvent(this,5,1)" onmouseup="P_Window.mouseEvent(this,5,0)"/>
+	  <g data-id="bar" transform="translate(300,0)" onmousedown="P_Window.mouseEvent(this,5,1)" onmouseup="P_Window.mouseEvent(this,5,0)">
+	    <rect data-id="bar" class="BarStatic" x="0" y="0" width="1100" height="9400"/>
+	  </g>
 	  <g data-id="bar_state" transform="translate(2000,0)">
 	    <rect class="BarDynamic" x="0" y="0" width="1100" height="9400"/>
 	    <path data-id="dir_0" class="BarMarker" d="M 100,550 L 1000,100 1000,1000 Z" style="display:none"/>
@@ -544,12 +549,16 @@
 	  </g>
 	</g>
 
-	<g data-id="shadow" style="mask:url(#mask_v)">
-	  <rect data-id="bar" class="BarStatic" x="0" y="6000" width="9400" height="1100" onmousedown="P_Window.mouseEvent(this,6,1)" onmouseup="P_Window.mouseEvent(this,6,0)"/>
+	<g data-id="blind" style="mask:url(#mask_v)">
+	  <g data-id="bar" transform="translate(0,6000)" onmousedown="P_Window.mouseEvent(this,6,1)" onmouseup="P_Window.mouseEvent(this,6,0)">
+	    <rect class="BarStatic" x="0" y="0" width="9400" height="1100"/>
+	  </g>
 	  <g data-id="bar_state" transform="translate(0,4000)">
 	    <rect class="BarDynamic" x="0" y="0" width="9400" height="1100"/>
-	    <path data-id="dir_0" class="BarMarker" d="M 550,100 L 100,1000 1000,1000 Z" style="display:none"/>
-	    <path data-id="dir_1" class="BarMarker" d="M 550,1000 L 100,100 1000,100 Z" style="display:inline"/>
+	    <g data-id="slat_state" transform="translate(0,0)">
+	      <path data-id="dir_0" class="BarMarker" d="M 550,100 L 100,1000 1000,1000 Z" style="display:none"/>
+	      <path data-id="dir_1" class="BarMarker" d="M 550,1000 L 100,100 1000,100 Z" style="display:inline"/>
+	    </g>
 	  </g>
 	</g>
 	
