@@ -33,6 +33,7 @@
 
     rect.BarStatic  { fill:rgb(102,102,255); stroke:rgb(52,101,164); }
     rect.BarDynamic { fill:rgb(204,102,255); stroke:rgb(52,101,164); }
+    rect.BarMarker  { fill:rgb(112,153,204); stroke:rgb(52,101,164); }
     path.BarMarker  { fill:rgb(112,153,204); stroke:rgb(52,101,164); }
 
     circle.LED      { fill:rgb(183,214,255); stroke:rgb(52,101,164); }
@@ -55,7 +56,58 @@
              var col_pressed = 'rgb(204,102,255)';
              var col_button  = 'rgb(112,153,204)';
 	     
-             var debug = false;
+
+
+             function Room() {
+               this.debug = false;
+	       this.setBusy(false);	     
+             }
+	       
+	     Room.prototype.debugOutput = function (text) {
+	       var node = document.getElementById('dbg_output');
+	       node.textContent = text;
+	     };
+	     
+	     Room.prototype.toggle_debug = function (node) {
+	       this.debug = ! this.debug;
+	       var rect = document.getElementById('btn_debug_face');
+	       rect.style.fill = this.debug ? col_pressed : col_button;
+             };
+	       
+	     Room.prototype.setBusy = function ( busy ) {
+	       busy = busy ? true : false;
+	       if ( this.busy == busy ) return;
+	       this.busy = busy ? true : false;
+	       var rect = document.getElementById('ind_busy');
+	       rect.style.fill = busy ? col_pressed : col_button;
+	       this.updateThread();
+	     };
+	     
+	     Room.prototype.updateThread = function () {
+	       if ( null != this.threadTimeout ) clearTimeout( this.threadTimeout );
+               serverRequest('/request/window/state.json',P_Window.resultHandler,null);
+	       var room = this;
+	       this.threadTimeout = setTimeout(function(){room.updateThread()}, (room.busy ? 200 : 1000) );
+             };
+
+
+
+             function ApplicationInitialize (evt) {
+               room = new Room();
+
+               var eList = document.getElementsByTagName('g');
+	       for ( var i = 0; i < eList.length; i++ ) {
+	         var node = eList[i];
+                 if ( null != node.dataset.onuse && 'g' == node.parentNode.nodeName ) {
+		   var useNode = node.parentNode;
+		   var f = eval(node.dataset.onuse)
+		   try { f(useNode,node) }
+		   catch (err) { alert( "error onuse: '"+node.dataset.onuse+"', "+err ) }
+                 }
+	       }
+	     }
+
+
 
              function getSubnodeById(node,id) {
                if ( node.dataset != null && node.dataset.id == id ) {
@@ -71,21 +123,20 @@
 	     }
 
              function serverRequest(url,hdl,data) {
-	       xmlHTTP = new XMLHttpRequest();
+	       var xmlHTTP = new XMLHttpRequest();
 	       xmlHTTP.onreadystatechange = function() {
 	         if (this.readyState == 4 && this.status == 200) {
 	           var text = xmlHTTP.responseText;
-		   try {
+		   //try {
   	             var jsonObj = JSON.parse(text);
 		     if ( hdl ) hdl(jsonObj,data);
 		     if ( jsonObj.result )
 	               alert('response: '+text);
 		     else
-		       debugOutput( text );
-		   } catch(err) {
-		     alert(err+'\nresponse: '+text+'\nurl: '+url);
-		   }
-                   //alert("result: "+jsonObj.result);
+		       room.debugOutput( text );
+		   //} catch(err) {
+		   //  alert(err+'\nresponse: '+text+'\nurl: '+url);
+		   //}
 	         }
                };
                xmlHTTP.open("GET", url, true);
@@ -93,54 +144,98 @@
 	     }
 
 
+	     function setNodePosition(node,x,y) {  
+	       // alternate setting x,y of a g-tag
+	       //var val = node[this.coord].baseVal;
+	       //val[0].newValueSpecifiedUnits(SVGLength.SVG_LENGTHTYPE_NUMBER, pixel);
+               if      ( 'g'    == node.nodeName || 'path' == node.nodeName )
+                 node.setAttribute('transform', 'translate('+x+','+y+')' );
+               else if ( 'rect' == node.nodeName ) {
+                 node.setAttribute('x', x);
+	         node.setAttribute('y', y);
+	       } else {
+	         alert( 'can not set position of a '+node.nodeName );
+               }
+             }
 
-             function Motor(id,coord,node) {
+
+             function Motor(id,coord,node,parentMotor) {
                this.id         = id;    // 'opener_' or 'blind_' or 'slat_' + win.id
                this.coord      = coord; // variable coordinate: 'x' for opener or 'y' for blinds
                this.node       = node;  // <g>-tag node 
-	       
+	       this.parent     = parentMotor // the blind motor is parent of the slat motor
+
                this.pos_min    =   0;
                this.pos_max    = 100;
 	       
                this.position     =  50;
                this.currentPos   =  70;
                this.state        =   0; // flags: 1 = pos valid, 2 = active, 4 = backward 
-	     }
-	     Motor.minPosPixel = 0;
-	     Motor.maxPosPixel = 9400 - 1100;
-	     Motor.minPos =   0;
-	     Motor.maxPos = 100;
-	     Motor.posToPixel_m = ( Motor.maxPosPixel - Motor.minPosPixel ) / ( Motor.maxPos - Motor.minPos );
-	     Motor.posToPixel_c = Motor.minPosPixel - Motor.minPos * Motor.posToPixel_m;
-	     Motor.posToPixel   = function(pos)   { return Math.floor( pos * Motor.posToPixel_m   + Motor.posToPixel_c + 0.5 ) };
-	     Motor.pixelToPos   = function(pixel) { return Math.floor( (pixel-Motor.posToPixel_c) / Motor.posToPixel_m + 0.5 ) };
+
+               this.minPosPixel  = 0;
+	       this.maxPosPixel  = 9400 - 1100; // geometry of window area
+	       this.minPos       =   0;
+	       this.maxPos       = 100;
+	       this.posToPixel_m = ( this.maxPosPixel - this.minPosPixel ) / ( this.maxPos - this.minPos );
+	       this.posToPixel_c = this.minPosPixel - this.minPos * this.posToPixel_m;
+             }
+             Motor.prototype.posToPixel = function(pos)   { return Math.floor( pos * this.posToPixel_m   + this.posToPixel_c + 0.5 ) };
+	     Motor.prototype.pixelToPos = function(pixel) { return Math.floor( (pixel-this.posToPixel_c) / this.posToPixel_m + 0.5 ) };
+	     Motor.prototype.adjustMaxPosPixel = function (pos) {
+	       if ( null == this.confMaxPosPixel ) this.confMaxPosPixel = this.maxPosPixel;
+	       var parent = this.parent
+	       this.maxPosPixel = Math.floor( (this.confMaxPosPixel ) * parent.currentPos / (parent.maxPos - parent.minPos) ) - 600;
+	       if ( this.maxPosPixel < this.minPosPixel + 1 ) this.maxPosPixel < this.minPosPixel + 1 
+	       this.posToPixel_m = ( this.maxPosPixel - this.minPosPixel ) / ( this.maxPos - this.minPos );
+	       this.posToPixel_c = this.minPosPixel - this.minPos * this.posToPixel_m;
+	     };
 	     Motor.prototype.setPosition = function (pos) {
 	       if ( pos < Motor.minPos ) pos = Motor.minPos;
                if ( pos > Motor.maxPos ) pos = Motor.maxPos;
                this.position = pos;
-	       node  = getSubnodeById(this.node,'bar');
-	       pixel = Motor.posToPixel(pos);
-	       val = node[this.coord].baseVal;
-	       val.newValueSpecifiedUnits(SVGLength.SVG_LENGTHTYPE_NUMBER, pixel);
-             }
-	     Motor.prototype.setCurrentPositionAndState = function (pos,state) {
+	       var node  = getSubnodeById(this.node,'bar');
+	       if ( this.parent ) this.adjustMaxPosPixel();
+	       var pixel = this.posToPixel(pos);
+	       if ( 'rect' == node.nodeName ) {
+     	         //room.debugOutput( 'Motor: '+this.id+' setPosition('+pos+') node: '+node.nodeName);
+	         //node[this.coord] = pixel;
+	         node.setAttribute(this.coord, pixel);
+	       } else {
+		 var trans = (this.coord=='x') ? [pixel,0] : [0,pixel];
+	         setNodePosition(node, trans[0], trans[1]);
+	       }
+             };
+	     Motor.prototype.setCurrentPositionAndState = function (pos,state,direction) {
+	       if ( null != this.currentPosition  && this.currentPosition  == pos   &&
+	            null != this.currentState     && this.currentState     == state &&
+	            null != this.currentDirection && this.currentDirection == direction
+	          ) return;
+
 	       if ( pos < Motor.minPos ) pos = Motor.minPos;
                if ( pos > Motor.maxPos ) pos = Motor.maxPos;
-               this.currentPos = pos;
-	       node  = getSubnodeById(this.node,'bar_state');
-	       pixel = Motor.posToPixel(pos);
-	       trans = (this.coord=='x') ? 'translate('+pixel+',0)' : 'translate(0,'+pixel+')';
-	       //alert('c:'+node[this.coord]+', transform: '+node.getAttribute('transform')+', trans: '+trans);
-	       node.setAttribute('transform', trans);
 
-               dir = (state & 0x04) >> 2;
-	       node = getSubnodeById(this.node,'dir_'+dir);
-	       node.style = 'display:inline';
+	       var node = getSubnodeById(this.node,'bar_state');
+	       if ( null == node ) node = getSubnodeById(this.node.parentNode.parentNode,'slat.bar_state');
 
-               dir = 1 - dir;
-	       node = getSubnodeById(this.node,'dir_'+dir);
-	       node.style = 'display:none';
-             }
+               if ( this.parent ) this.adjustMaxPosPixel();
+               var pixel = this.posToPixel(pos);
+	       var trans = (this.coord=='x') ? [pixel,0] : [0,pixel];
+               //room.debugOutput( 'Motor: '+this.id+' setCurrentPositionAndState('+pos+', '+state+', '+direction+') node: '+node.nodeName+', pixel:'+pixel);
+	       
+	       if ( state ) {
+		 { var n = getSubnodeById(node,'dir_'+(  direction)); if (n) n.style = 'display: none';   }
+		 { var n = getSubnodeById(node,'dir_'+(1-direction)); if (n) n.style = 'display: inline'; }
+	         setNodePosition(node, trans[0], trans[1] );
+		 node.style = 'visibility:visible';
+               } else {
+		 node.style = 'visibility:hidden';
+		 if ( null == this.currentState || this.currentState && !state ) this.setPosition(pos);
+	       }
+	 
+ 	       this.currentPos       = pos;
+               this.currentState     = state;
+	       this.currentDirection = direction;               
+            };
 
 
 
@@ -153,7 +248,7 @@
 	       //alert( "window "+id+" constructed, name: "+this.NameNode );
                this.opener = new Motor('opener_'+id,'x',this.getSubNode('opener'));
                this.blind  = new Motor('blind_'+id, 'y',this.getSubNode('blind' ));
-               this.slat   = new Motor('slat_'+id,  'x',this.getSubNode('slat'  ));
+               this.slat   = new Motor('slat_'+id,  'x',this.getSubNode('slat'  ), this.blind );
 
                var buttons = [ 'w_name', 'w_btn_c', 'w_btn_o', 'w_btn_r', 'w_btn_l' ];
 	       for (var i = 1; i < buttons.length; i++) {
@@ -177,11 +272,24 @@
 	     };
 	     P_Window.resultHandler = function (res,self) {
 	       if ( null == res ) {
-	         debugOutput( 'resultHandler error' );
+	         room.debugOutput( 'resultHandler error' );
 	       } else if ( res.result ) {
-		 debugOutput( res.toString() );
+		 room.debugOutput( res.toString() );
 	       } else {
-		 debugOutput( res.toString() );
+		 //room.debugOutput( res.toString() );
+	         if ( null != res.window && null != res.window.count ) {
+		   var count = res.window.count;
+		   busy = 0;
+		   for ( var i = 0; i < count; i++ ) {
+		     var win_data = res['window_'+i];
+		     var pWin = P_Window.windows[win_data.id]
+		     busy |= ( win_data.opener.state | win_data.blind.state );
+		     pWin.opener.setCurrentPositionAndState(win_data.opener.position,win_data.opener.state,win_data.opener.drive_direction);
+		     pWin.blind.setCurrentPositionAndState(win_data.blind.position,win_data.blind.state,win_data.blind.drive_direction);
+		     pWin.slat.setCurrentPositionAndState(win_data.blind.hard_pos_back*10,win_data.blind.state,win_data.blind.drive_direction);
+		   }
+		   room.setBusy( busy );  
+	         }
 	         if ( null != res.sr_state ) {
 		   SR_LEDs.result(res,null)
 	         }
@@ -191,10 +299,13 @@
 	       if        ( 1 == nr || 2 == nr ) {
 	         var pos   = nr == 1 ? this.opener.pos_min : this.opener.pos_max
 	         this.serverReq('action','&action=set_position&motor=opener&pos='+pos);
+		 this.opener.setPosition( pos );
 	       } else if ( 3 == nr || 4 == nr ) {
 	         var pos   = nr == 3 ? this.blind.pos_min : this.blind.pos_max;
 	         var angle = nr == 3 ? this.slat.pos_max  : this.slat.pos_min;
 	         this.serverReq('action','&action=set_position&motor=blind&pos='+pos+'&angle='+angle);
+		 this.blind.setPosition( pos );
+		 this.slat.setPosition( angle );
 	       }
              };
 	     P_Window.prototype.buttonPress = function (nr)   {
@@ -232,26 +343,7 @@
 	       }
 	     };
 
-	     P_Window.thread = function () {
-               P_Window.request()
-               setTimeout(P_Window.thread,2000);
-             };
-	     //P_Window.thread();
 
-
-
-             function ApplicationInitialize (evt) {
-               var eList = document.getElementsByTagName('g');
-	       for ( var i = 0; i < eList.length; i++ ) {
-	         var node = eList[i];
-                 if ( null != node.dataset.onuse && 'g' == node.parentNode.nodeName ) {
-		   var useNode = node.parentNode;
-		   var f = eval(node.dataset.onuse)
-		   try { f(useNode,node) }
-		   catch (err) { alert( "error onuse: '"+node.dataset.onuse+"', "+err ) }
-                 }
-	       }
-	     }
 
 
              P_Window.mouseEvent = function(event) {
@@ -364,21 +456,12 @@
 	     }
 
 
-	     function mouse(obj,nr,t) {
-	       win = getWindow(obj);
-	       toggle_mouse(t);
-               if ( debug ) {
-	         var s = "Mouse "+t+"!\n";
-                 alert( s );
-	       }
-	     }
-
 
 	     function drag_event(obj,nr,t) {
 	       win = getWindow(obj);
 	       toggle_drag(t,1);
                setTimeout(function(){ toggle_drag(t,0); },300);
-	       if ( debug ) {
+	       if ( room.debug ) {
 	         var s = "Drag "+t+"!\n";
                  alert( s );
 	       }
@@ -389,29 +472,12 @@
 	       getWindow(obj);
 	       toggle_click(1);
 	       setTimeout(function(){ toggle_click(0); },300);
-	       if ( debug ) {
+	       if ( room.debug ) {
 	         var id = obj.id;
                  alert('Bar wurde angeklickt!\n'+id)
                }
              }
 	       
-	     function debugOutput(text) {
-	       node = document.getElementById('dbg_output');
-	       node.textContent = text;
-	     }
-	       
-	     function toggle_debug(node) {
-	       debug = ! debug;
-	       rect  = document.getElementById('btn_debug_face'); // node.childNodes[1];
-	       //alert( "rect: "+rect );
-	       rect.style.fill = debug ? col_pressed : col_button;
-             }
-	       
-	     function toggle_mouse(on) {
-	       rect = document.getElementById('ind_mouse');
-	       rect.style.fill = on ? col_pressed : col_button;
-             }
-  
 	     function toggle_click(on) {
 	       rect = document.getElementById('ind_click');
 	       rect.style.fill = on ? col_pressed : col_button;
@@ -450,11 +516,11 @@
 	     };
 	     SR_LEDs.result = function (res,data) {
 	       if ( null == res ) {
-	         debugOutput( 'SR_LEDs.result handler error' );
+	         room.debugOutput( 'SR_LEDs.result handler error' );
 	       } else if ( res.result ) {
-		 debugOutput( res.toString() );
+	         room.debugOutput( 'SR_LEDs result: '+res.toString() );
 	       } else if ( null == res.sr_state ) {
-		 debugOutput( 'missing sr_state in: '+res.toString() );
+		 room.debugOutput( 'missing sr_state in: '+res.toString() );
 	       } else {
 		 SR_LEDs.showOutput(res.sr_state);
 	       }
@@ -489,7 +555,7 @@
              };
 	     SR_LEDs.thread = function () {
                SR_LEDs.request()
-               setTimeout(SR_LEDs.thread,2000);
+               setTimeout(SR_LEDs.thread,3000);
              };
 	     SR_LEDs.thread();
 	       
@@ -570,10 +636,15 @@
 	<g data-id="blind" style="mask:url(#mask_v)">
 	  <g data-id="bar" transform="translate(0,6000)" onmousedown="P_Window.mouseEvent(this,6,1)" onmouseup="P_Window.mouseEvent(this,6,0)">
 	    <rect class="BarStatic" x="0" y="0" width="9400" height="1100"/>
+	    <g data-id="slat" transform="translate(0,0)">
+	      <g data-id="bar" transform="translate(0,0)">
+	        <rect class="BarMarker" x="100" y="100" width="900" height="900"/>
+	      </g>
+	    </g>
 	  </g>
 	  <g data-id="bar_state" transform="translate(0,4000)">
 	    <rect class="BarDynamic" x="0" y="0" width="9400" height="1100"/>
-	    <g data-id="slat_state" transform="translate(0,0)">
+	    <g data-id="slat.bar_state" transform="translate(0,0)">
 	      <path data-id="dir_0" class="BarMarker" d="M 550,100 L 100,1000 1000,1000 Z" style="display:none"/>
 	      <path data-id="dir_1" class="BarMarker" d="M 550,1000 L 100,100 1000,100 Z" style="display:inline"/>
 	    </g>
@@ -595,28 +666,18 @@
   <use id="win_R4" href="#w_window" x="500"   y="13000"/>
   <use id="win_R1" href="#w_window" x="39500" y="13000"/>
 
-  <g transform="translate(13500,13000)" onclick="toggle_debug(this)">
+  <g transform="translate(13500,13000)" onclick="room.toggle_debug(this)">
     <rect id="btn_debug_face" class="Button" x="0" y="0" width="3000" height="1800"/>
     <text class="Button" x="500" y="1400">debug</text>
   </g>
 
   <g transform="translate(13500,14900)">
-    <rect id="ind_mouse" class="Button" x="0" y="0" width="3000" height="1800"/>
-    <text class="Button" x="500" y="1400">mouse</text>
-  </g>
-
-  <g transform="translate(13500,16800)">
-    <rect id="ind_move" class="Button" x="0" y="0" width="3000" height="1800"/>
-    <text class="Button" x="500" y="1400">move</text>
-  </g>
-
-  <g transform="translate(13500,20700)">
-    <rect id="ind_click" class="Button" x="0" y="0" width="3000" height="1800"/>
-    <text class="Button" x="500" y="1400">click</text>
+    <rect id="ind_busy" class="Button" x="0" y="0" width="3000" height="1800"/>
+    <text class="Button" x="500" y="1400">busy</text>
   </g>
 
   
-  <g transform="translate(16600,13000)" onclick="toggle_debug(this)">
+  <g transform="translate(16600,13000)">
     <rect id="ind_drag_0" class="Button" x="0" y="0" width="3000" height="1800"/>
     <text class="Button" x="500" y="1400">start</text>
   </g>
@@ -637,7 +698,7 @@
   </g>
 
   
-  <g transform="translate(19700,13000)" onclick="toggle_debug(this)">
+  <g transform="translate(19700,13000)">
     <rect id="ind_btn_click" class="Button" x="0" y="0" width="3000" height="1800"/>
     <text class="Button" x="500" y="1400">click</text>
   </g>

@@ -19,18 +19,26 @@ try:
     import RPi.GPIO as GPIO
 except:
     # Fake implementation of GPIO to allow development on a non RasPi
+    print("!!! use simulated RPI.GPIO !!!\n")
     class GPIO:
         BOARD = 0
         OUT   = 0
         LOW   = 0
         HIGH  = 1
         def setmode( pin_name_mode ):
+            if GPIO.BOARD != pin_name_mode: raise TypeError("illegal pin_name_mode '{}' in GPIO.setmode".format(pin_name_mode))
             pass
         def setup( pin, pin_mode ):
+            if not isinstance(pin,int) or pin < 1 or pin >= 40: raise TypeError("illegal pin value '{}' in GPIO.output".format(pin))
+            if GPIO.OUT: raise TypeError("illegal pin_mode '{}' in GPIO.setup".format(pin_mode))
             pass
         def output( pin, value ):
+            if not isinstance(pin,int) or pin < 1 or pin >= 40: raise TypeError("illegal pin value '{}' in GPIO.output".format(pin))
+            if GPIO.LOW != value and GPIO.HIGH != value: raise TypeError("illegal output value '{}' in GPIO.output".format(value))
+            print("GPIO.output( {}, {} )".format(pin,value))
             pass
 
+        
 if UseThreading:
     # to use a ThreadingHTTPServer
     import threading
@@ -169,13 +177,13 @@ class ProjectEncoder(json.JSONEncoder):
         return json.JSONEncoder.default(self, obj)
 
         
-    
+
 class ShiftRegister: # 74HC595
 
     outLevel_LOW_HIGH = [ GPIO.LOW, GPIO.HIGH ]
     outLevel_HIGH_LOW = [ GPIO.HIGH, GPIO.LOW ]
-
-    def __init__(self,pinDATA,pinCLOCK,pinLATCH,pinENABLE,bits=8,enableLevel='HIGH',dataLevel='HIGH',setupTime=0,holdTime=0):
+    
+    def __init__(self,pinDATA,pinCLOCK,pinLATCH,pinENABLE,bits=8,enableLevel='HIGH',dataLevel='HIGH',setupTime=-1,holdTime=-1,clockTime=-1):
         self.pinDATA   = pinDATA
         self.pinCLOCK  = pinCLOCK
         self.pinLATCH  = pinLATCH
@@ -185,22 +193,33 @@ class ShiftRegister: # 74HC595
         if dataLevel   != 'HIGH' and dataLevel   != 'LOW': raise ValueError( 'dataLevel   must be HIGH or LOW' )
         self.enableLevel = ( self.outLevel_LOW_HIGH if enableLevel == 'HIGH' else self.outLevel_HIGH_LOW )
         self.dataLevel   = ( self.outLevel_LOW_HIGH if dataLevel   == 'HIGH' else self.outLevel_HIGH_LOW )
-        self.setupTime   = setupTime
-        self.holdTime    = holdTime
+        self.setupTime   = ( None if setupTime <= 0 else setupTime )
+        self.holdTime    = ( None if holdTime  <= 0 else holdTime  )
+        self.clockTime   = ( None if clockTime <= 0 else clockTime )
+
+        print("shift register enableLevel: '{}'".format(enableLevel))
+        print("shift register dataLevel: '{}'".format(dataLevel))
         
         self.bitset    = Bitset(bits)
         self.dirty     = True
         self.enabled   = None
         self.output    = None
+        self.lastTime  = time.time()
 
         
     def shiftBit(self,bit=0):
+        if self.clockTime is not None:
+            now = time.time()
+            dt  = now - self.lastTime
+            if dt < self.clockTime:
+                time.sleep(clockTime-dt) # sleep to assure data is processed
+            self.lastTime = now
         GPIO.output(self.pinCLOCK, GPIO.LOW)
         GPIO.output(self.pinDATA,  self.dataLevel[bit and 1 or 0])
-        if self.setupTime:
+        if self.setupTime is not None:
             time.sleep(self.setupTime) # sleep to assure data valid
         GPIO.output(self.pinCLOCK, GPIO.HIGH)
-        if self.holdTime:
+        if self.holdTime is not None:
             time.sleep(self.holdTime) # sleep to assure data valid
 
                 
@@ -746,9 +765,10 @@ class Room:
         bits        = self.config.get('shift_register.bits',16)
         enableLevel = self.config.get('shift_register.enableLevel','HIGH')
         dataLevel   = self.config.get('shift_register.dataLevel',  'HIGH')
-        setupTime   = float(self.config.get('shift_register.setupTime','0'))
-        holdTime    = float(self.config.get('shift_register.holdTime', '0'))
-        GPIO.setmode(GPIO.BOARD)        # Number GPIOs by its physical location
+        setupTime   = self.config.get('shift_register.setupTime',-1)
+        holdTime    = self.config.get('shift_register.holdTime', -1)
+        clockTime   = self.config.get('shift_register.clockTime',-1)
+        GPIO.setmode(GPIO.BOARD) # Number GPIOs by its physical location
         GPIO.setup(pinDATA,   GPIO.OUT)
         GPIO.setup(pinCLOCK,  GPIO.OUT)
         GPIO.setup(pinLATCH,  GPIO.OUT)
