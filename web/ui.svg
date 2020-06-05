@@ -2,6 +2,31 @@
 <!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN" "http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd">
 <svg version="1.2" _width="154mm" _height="85.9mm" width="308mm" height="171.8mm" viewBox="0 0 53000 26000" preserveAspectRatio="xMidYMid" fill-rule="evenodd" stroke-width="28.222" stroke-linejoin="round" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" xmlns:anim="urn:oasis:names:tc:opendocument:xmlns:animation:1.0" xml:space="preserve" onload="ApplicationInitialize(evt)" style="background:black">
 
+  <!--
+      User Interface of room-control
+
+Basic technics:
+The <use> tags for windows and leds are interpreted by the webserver by copying the code of the "start template" / "end template" comments 
+Communication to the Server is don by the function serverRequest() using ajax/XMLHttpRequest and JSON.parse(text).
+
+Classes:
+Room
+Motor
+P_Window
+SR_LEDs
+
+
+Future steps:
+
+Dragging
+https://www.w3schools.com/howto/tryit.asp?filename=tryhow_js_draggable
+http://www.codedread.com/blog/archives/2005/12/21/how-to-enable-dragging-in-svg/
+http://phrogz.net/SVG/screen_location_for_element.xhtml
+
+Authentication
+https://gist.github.com/dragermrb/108158f5a284b5fba806
+  -->
+
   <!--defs>
     <font id="EmbeddedFont_1">
       <font-face font-family="Liberation Sans embedded" units-per-em="2048" font-weight="normal" font-style="normal" ascent="1852" descent="423">
@@ -27,7 +52,7 @@
     text.Name       { font-family:"Liberation Sans embedded"; font-size:1905px; font-weight:400; }
 
     rect.Button     { fill:rgb(112,153,204); stroke:rgb(52,101,164); }
-    path.Button     { fill:rgb(112,153,204); stroke:rgb(52,101,164); }
+    path.Button     { fill:rgb(112,153,204); stroke:rgb(112,153,204); }
     //text.Button     { font-family:"Liberation Sans, sans-serif"; font-size:635px; font-weight:400; }
     text.Button     { font-family:"Liberation Sans embedded"; font-size:635px; font-weight:400; }
 
@@ -58,6 +83,18 @@
 	     
 
 
+             function setNodeActive(node,autoreset) {
+	       node.style.fill = col_pressed;
+	       if (autoreset)
+	         setTimeout(function(){node.style.fill = col_button;}, 500 );
+	     }
+
+             function setButtonActive(node,autoreset) {
+	       setNodeActive(node.childNodes[1], autoreset);
+	     }
+
+
+
              function Room() {
                this.debug = false;
 	       this.setBusy(false);	     
@@ -85,9 +122,28 @@
 	     
 	     Room.prototype.updateThread = function () {
 	       if ( null != this.threadTimeout ) clearTimeout( this.threadTimeout );
-               serverRequest('/request/window/state.json',P_Window.resultHandler,null);
+               serverRequest('/request/window/state.json', P_Window.resultHandler, null);
 	       var room = this;
 	       this.threadTimeout = setTimeout(function(){room.updateThread()}, (room.busy ? 200 : 1000) );
+             };
+
+             Room.prototype.action_click = function (node,action) {
+	       rect = node.childNodes[1]
+	       setNodeActive(rect,1);
+	       serverRequest('/request/room/action.json?action='+action, P_Window.resultHandler, null);
+	       for ( var win_id in P_Window.windows ) {
+	         win = P_Window.windows[win_id];
+	         try {
+	           if      ( 'all_close' == action ) { var m = win.opener; m.setPosition(m.minPos); }
+	           else if ( 'all_open'  == action ) { var m = win.opener; m.setPosition(m.maxPos); }
+	           else if ( 'all_raise' == action ) { var b = win.blind;  b.setPosition(b.minPos);
+		                                       var s = win.slat;   s.setPosition(s.maxAngle); }
+	           else if ( 'all_lower' == action ) { var b = win.blind;  b.setPosition(b.maxPos);
+		                                       var s = win.slat;   s.setPosition(s.minAngle); }
+		 } catch ( e ) {
+		   alert( "win: '"+win+"', " + e )
+		 }
+	       }
              };
 
 
@@ -144,11 +200,14 @@
 	     }
 
 
+
 	     function setNodePosition(node,x,y) {  
 	       // alternate setting x,y of a g-tag
-	       //var val = node[this.coord].baseVal;
-	       //val[0].newValueSpecifiedUnits(SVGLength.SVG_LENGTHTYPE_NUMBER, pixel);
-               if      ( 'g'    == node.nodeName || 'path' == node.nodeName )
+	       // var val = node[this.coord].baseVal;
+	       // val[0].newValueSpecifiedUnits(SVGLength.SVG_LENGTHTYPE_NUMBER, pixel);
+	       // https://docs.w3cub.com/dom/svglength/
+	       // https://developer.mozilla.org/en-US/docs/Web/API/SVGLength
+	       if      ( 'g'    == node.nodeName || 'path' == node.nodeName )
                  node.setAttribute('transform', 'translate('+x+','+y+')' );
                else if ( 'rect' == node.nodeName ) {
                  node.setAttribute('x', x);
@@ -179,6 +238,7 @@
 	       this.posToPixel_m = ( this.maxPosPixel - this.minPosPixel ) / ( this.maxPos - this.minPos );
 	       this.posToPixel_c = this.minPosPixel - this.minPos * this.posToPixel_m;
              }
+	     Motor.prototype.toString   = function () { return "[Motor: '"+this.id+"'"};
              Motor.prototype.posToPixel = function(pos)   { return Math.floor( pos * this.posToPixel_m   + this.posToPixel_c + 0.5 ) };
 	     Motor.prototype.pixelToPos = function(pixel) { return Math.floor( (pixel-this.posToPixel_c) / this.posToPixel_m + 0.5 ) };
 	     Motor.prototype.adjustMaxPosPixel = function (pos) {
@@ -261,6 +321,7 @@
                }
              }
 	     P_Window.windows = {};
+	     P_Window.prototype.toString       = function () { return "[Window: '"+this.id+"'"+' '+this.opener+' '+this.blind+' '+this.slat};
 	     P_Window.prototype.getSubNode     = function (id)   { return getSubnodeById( this.WinNode, id );   };
 	     P_Window.prototype.setName        = function (name) { this.NameNode.children[1].textContent = name };
 	     P_Window.prototype.setOpenerState = function (state){ this.NameNode.children[1].textContent = name };
@@ -536,7 +597,15 @@
 	     };
 	     SR_LEDs.showOutput = function (state,data) {
 	       document.getElementById('LED_enable').style.fill = state.enable ? col_led_on : col_led_off;
-
+	       var buttons = [ 'data', 'clock', 'latch' ];
+	       for ( var i = 0; i < buttons.length; i++ ) {
+	         var name = buttons[i];
+		 node = document.getElementById('btn_sr_'+name);
+		 if ( null != node ) {
+		   var rect = node.childNodes[1];
+		   node.style.fill = state[name] ? col_pressed : col_button;
+	         }
+	       }
                var bits = state.bits;
 	       if ( state.output ) {
 	         for ( var bitIdx = 0; bitIdx < bits; bitIdx++ ) {
@@ -549,9 +618,10 @@
 	         }
 	       }   
              };
-	     SR_LEDs.clickNode = function (node,bit) {
-	       //var bit 
-	       
+	     SR_LEDs.ButtonCode = { 'data': -2, 'clock': -3, 'latch': -4 };  
+	     SR_LEDs.clickNode = function (node,name) {
+	       var bit = SR_LEDs.ButtonCode[name];
+               serverRequest('/request/sr/action.json?action=toggle_bit&bit='+bit,SR_LEDs.result,null);
              };
 	     SR_LEDs.thread = function () {
                SR_LEDs.request()
@@ -658,72 +728,105 @@
 
   </defs>
 
-  <use id="win_L4" href="#w_window" x="500"   y="500"/>
-  <use id="win_L3" href="#w_window" x="13500" y="500"/>
-  <use id="win_L2" href="#w_window" x="26500" y="500"/>
-  <use id="win_L1" href="#w_window" x="39500" y="500"/>
+  <use id="win_L1" href="#w_window" x="300"   y="500"/>
+  <use id="win_R1" href="#w_window" x="13300" y="500"/>
+  <use id="win_R3" href="#w_window" x="26300" y="500"/>
   
-  <use id="win_R4" href="#w_window" x="500"   y="13000"/>
-  <use id="win_R1" href="#w_window" x="39500" y="13000"/>
+  <use id="win_L2" href="#w_window" x="300"   y="13000"/>
+  <use id="win_R2" href="#w_window" x="13300" y="13000"/>
+  <use id="win_R4" href="#w_window" x="26300" y="13000"/>
 
-  <g transform="translate(13500,13000)" onclick="room.toggle_debug(this)">
-    <rect id="btn_debug_face" class="Button" x="0" y="0" width="3000" height="1800"/>
-    <text class="Button" x="500" y="1400">debug</text>
+  <g transform="translate(300,-500)">
+    <rect class="Text" x="0" y="0" width="45000" height="700"/>
+    <text id="dbg_output" class="DbgOut" x="200" y="500">.</text>
   </g>
 
-  <g transform="translate(13500,14900)">
-    <rect id="ind_busy" class="Button" x="0" y="0" width="3000" height="1800"/>
-    <text class="Button" x="500" y="1400">busy</text>
-  </g>
+  <g transform="translate(39300,500)">
+    <g transform="translate(0,0)">
+      <g transform="translate(900,300) scale(2.0,2.0)">
+	<!-- symbol taken from https://fontawesome.com/icons/cog?style=solid -->
+        <path class="Button" d="M487.4 315.7l-42.6-24.6c4.3-23.2 4.3-47 0-70.2l42.6-24.6c4.9-2.8 7.1-8.6 5.5-14-11.1-35.6-30-67.8-54.7-94.6-3.8-4.1-10-5.1-14.8-2.3L380.8 110c-17.9-15.4-38.5-27.3-60.8-35.1V25.8c0-5.6-3.9-10.5-9.4-11.7-36.7-8.2-74.3-7.8-109.2 0-5.5 1.2-9.4 6.1-9.4 11.7V75c-22.2 7.9-42.8 19.8-60.8 35.1L88.7 85.5c-4.9-2.8-11-1.9-14.8 2.3-24.7 26.7-43.6 58.9-54.7 94.6-1.7 5.4.6 11.2 5.5 14L67.3 221c-4.3 23.2-4.3 47 0 70.2l-42.6 24.6c-4.9 2.8-7.1 8.6-5.5 14 11.1 35.6 30 67.8 54.7 94.6 3.8 4.1 10 5.1 14.8 2.3l42.6-24.6c17.9 15.4 38.5 27.3 60.8 35.1v49.2c0 5.6 3.9 10.5 9.4 11.7 36.7 8.2 74.3 7.8 109.2 0 5.5-1.2 9.4-6.1 9.4-11.7v-49.2c22.2-7.9 42.8-19.8 60.8-35.1l42.6 24.6c4.9 2.8 11 1.9 14.8-2.3 24.7-26.7 43.6-58.9 54.7-94.6 1.5-5.5-.7-11.3-5.6-14.1zM256 336c-44.1 0-80-35.9-80-80s35.9-80 80-80 80 35.9 80 80-35.9 80-80 80z"/>
+      </g>
+    </g>
 
+    <g id="bank_1_debug">
+      <g transform="translate(0,1900)">
+	<rect id="ind_busy" class="Button" x="0" y="0" width="3000" height="1800"/>
+	<text class="Button" x="500" y="1400">busy</text>
+      </g>
+
+      <g transform="translate(0,3800)">
+	<rect id="ind_btn_click" class="Button" x="0" y="0" width="3000" height="1800"/>
+	<text class="Button" x="500" y="1400">click</text>
+      </g>
+
+      <g transform="translate(0,5700)">
+	<rect id="ind_btn_press" class="Button" x="0" y="0" width="3000" height="1800"/>
+	<text class="Button" x="500" y="1400">press</text>
+      </g>
+
+      <g transform="translate(0,7600)">
+	<rect id="ind_btn_release" class="Button" x="0" y="0" width="3000" height="1800"/>
+	<text class="Button" x="500" y="1400">release</text>
+      </g>
   
-  <g transform="translate(16600,13000)">
-    <rect id="ind_drag_0" class="Button" x="0" y="0" width="3000" height="1800"/>
-    <text class="Button" x="500" y="1400">start</text>
-  </g>
-
-  <g transform="translate(16600,14900)">
-    <rect id="ind_drag_1" class="Button" x="0" y="0" width="3000" height="1800"/>
-    <text class="Button" x="500" y="1400">drag</text>
-  </g>
-
-  <g transform="translate(16600,16800)">
-    <rect id="ind_drag_2" class="Button" x="0" y="0" width="3000" height="1800"/>
-    <text class="Button" x="500" y="1400">end</text>
-  </g>
-
-  <g transform="translate(16600,20700)">
-    <rect id="ind_" class="Button" x="0" y="0" width="3000" height="1800"/>
-    <text class="Button" x="500" y="1400">_</text>
-  </g>
-
-  
-  <g transform="translate(19700,13000)">
-    <rect id="ind_btn_click" class="Button" x="0" y="0" width="3000" height="1800"/>
-    <text class="Button" x="500" y="1400">click</text>
-  </g>
-
-  <g transform="translate(19700,14900)">
-    <rect id="ind_btn_press" class="Button" x="0" y="0" width="3000" height="1800"/>
-    <text class="Button" x="500" y="1400">press</text>
-  </g>
-
-  <g transform="translate(19700,16800)">
-    <rect id="ind_btn_release" class="Button" x="0" y="0" width="3000" height="1800"/>
-    <text class="Button" x="500" y="1400">release</text>
+      <g transform="translate(0,9500)">
+	<rect id="ind_btn_move" class="Button" x="0" y="0" width="3000" height="1800"/>
+	<text class="Button" x="500" y="1400">move</text>
+      </g>
+    </g>
   </g>
   
-  <g transform="translate(19700,18700)">
-    <rect id="ind_btn_move" class="Button" x="0" y="0" width="3000" height="1800"/>
-    <text class="Button" x="500" y="1400">move</text>
+  <g transform="translate(42400,500)">
+    <g transform="translate(0,0)" onclick="room.action_click(this,'all_close')">
+      <rect class="Button" x="0" y="0" width="3000" height="1800"/>
+      <text class="Button" x="900" y="800">all</text>
+      <text class="Button" x="500" y="1500">close</text>
+    </g>
+
+    <g transform="translate(0,1900)" onclick="room.action_click(this,'all_open')">
+      <rect class="Button" x="0" y="0" width="3000" height="1800"/>
+      <text class="Button" x="900" y="800">all</text>
+      <text class="Button" x="500" y="1500">open</text>
+    </g>
+
+    <g transform="translate(0,3800)" onclick="room.action_click(this,'all_raise')">
+      <rect class="Button" x="0" y="0" width="3000" height="1800"/>
+      <text class="Button" x="900" y="800">all</text>
+      <text class="Button" x="500" y="1500">raise</text>
+    </g>
+  
+    <g transform="translate(0,5700)" onclick="room.action_click(this,'all_lower')">
+      <rect class="Button" x="0" y="0" width="3000" height="1800"/>
+      <text class="Button" x="900" y="800">all</text>
+      <text class="Button" x="500" y="1500">lower</text>
+    </g>
   </g>
 
-  <g transform="translate(500,0)">
-    <rect class="Text" x="0" y="-500" width="30000" height="700"/>
-    <text id="dbg_output" class="DbgOut" x="200" y="0">.</text>
+  <g transform="translate(39300,12200)">
+    <g transform="translate(0,0)" onclick="room.toggle_debug(this)">
+      <rect id="btn_debug_face" class="Button" x="0" y="0" width="3000" height="1800"/>
+      <text class="Button" x="500" y="1400">debug</text>
+    </g>
+
+    <g transform="translate(0,1900)" onclick="SR_LEDs.clickNode(this,'data')">
+      <rect id="btn_sr_data" class="Button" x="0" y="0" width="3000" height="1800"/>
+      <text class="Button" x="500" y="1400">data</text>
+    </g>
+
+    <g transform="translate(0,3800)" onclick="SR_LEDs.clickNode(this,'clock')">
+      <rect id="btn_sr_clock" class="Button" x="0" y="0" width="3000" height="1800"/>
+      <text class="Button" x="500" y="1400">clock</text>
+    </g>
+  
+    <g transform="translate(0,5700)" onclick="SR_LEDs.clickNode(this,'latch')">
+      <rect id="btn_sr_latch" class="Button" x="0" y="0" width="3000" height="1800"/>
+      <text class="Button" x="500" y="1400">latch</text>
+    </g>
   </g>
 
-  <g transform="translate(22800,13000)">
+
+  <g transform="translate(42400,12200)">
     <rect class="Text" x="0" y="0" width="1900" height="12800"/>
     <circle id="LED_enable" class="LED" cx="300" cy="300" r="200" onclick="SR_LEDs.click(-1,-1,'enable')"/>
     <text class="LED" x="800" y="400">en</text>

@@ -206,7 +206,23 @@ class ShiftRegister: # 74HC595
         self.output    = None
         self.lastTime  = time.time()
 
+        self.stData    = None
+        self.stClock   = None
+        self.stLatch   = None
+
         
+    def togglePin(self,pin): # -2 = DATA, -3 = CLOCK, -4 = LATCH
+        if   -2 == pin:
+            self.stData  = 1 - self.stData
+            GPIO.output(self.pinDATA, self.dataLevel[self.stData and 1 or 0])
+        elif -3 == pin:
+            self.stClock = 1 - self.stClock
+            GPIO.output(self.pinCLOCK, self.stClock and GPIO.HIGH or GPIO.LOW)
+        elif -4 == pin:
+            self.stLatch = 1 - self.stLatch
+            GPIO.output(self.pinLATCH, self.stLatch and GPIO.HIGH or GPIO.LOW)
+
+            
     def shiftBit(self,bit=0):
         if self.clockTime is not None:
             now = time.time()
@@ -215,14 +231,17 @@ class ShiftRegister: # 74HC595
                 time.sleep(clockTime-dt) # sleep to assure data is processed
             self.lastTime = now
         GPIO.output(self.pinCLOCK, GPIO.LOW)
+        self.stClock = 0
         GPIO.output(self.pinDATA,  self.dataLevel[bit and 1 or 0])
+        self.stData = bit and 1 or 0
         if self.setupTime is not None:
             time.sleep(self.setupTime) # sleep to assure data valid
         GPIO.output(self.pinCLOCK, GPIO.HIGH)
+        self.stClock = 1
         if self.holdTime is not None:
             time.sleep(self.holdTime) # sleep to assure data valid
 
-                
+
     def clearRegister(self):
         for i in range(0,self.bits):
             self.shiftBit()
@@ -246,9 +265,11 @@ class ShiftRegister: # 74HC595
     def latch(self): # shift all bits into register and latch
         if not self.dirty: return
         GPIO.output(self.pinLATCH, GPIO.LOW)
+        self.stLatch = 0
         for idx in range(0, self.bitset.bits):
             self.shiftBit( self.bitset.get(idx) )
         GPIO.output(self.pinLATCH, GPIO.HIGH)
+        self.stLatch = 1
         #if self.holdTime: time.sleep(self.holdTime) # sleep to assure data latched
         self.dirty = False
         self.output = self.bitset.copy()
@@ -262,7 +283,10 @@ class ShiftRegister: # 74HC595
     def getState(self):
         return  { 'enable': self.enabled,
                   'bits':   self.bitset.bits,
-                  'output': self.output
+                  'output': self.output,
+                  'data':   self.stData,
+                  'clock':  self.stClock,
+                  'latch':  self.stLatch
                 }
 
 
@@ -659,8 +683,10 @@ class SR_Event (RoomEvent):
         print( "\nSR_Event.handle() toggle bit {}".format(self.bit) )
         sr  = self.room.shift_register
         bit = self.bit
-        if -1 == bit:
+        if   -1 == bit:
             sr.enable( 0 if sr.enabled else 1 )
+        elif 0 > bit:
+            sr.togglePin(bit)
         else:
             b = sr.getOutputBit(bit)
             sr.setBit(bit, 0 if b else 1 )
@@ -839,6 +865,26 @@ class Room:
         if 'window/config' == action:
             window = self.windows[args['win_id']]
             return { 'result': 0, 'win_config': window.getConfig() }
+        if 'room/action' == action:
+            action = args['action']
+            if 'all_close' == action:
+                for win in self.windows.values():
+                    motor = win.opener
+                    room.pushEvent( SetPositionEvent(self,{'win_id':win.id,'motor':'opener','pos':motor.position_min,'angle':None}) )
+            if 'all_open' == action:
+                for win in self.windows.values():
+                    motor = win.opener
+                    room.pushEvent( SetPositionEvent(self,{'win_id':win.id,'motor':'opener','pos':motor.position_max,'angle':None}) )
+            if 'all_raise' == action:
+                for win in self.windows.values():
+                    motor = win.blind
+                    room.pushEvent( SetPositionEvent(self,{'win_id':win.id,'motor':'blind','pos':motor.position_min,'angle':motor.angle_max}) )
+            if 'all_lower' == action:
+                for win in self.windows.values():
+                    motor = win.blind
+                    room.pushEvent( SetPositionEvent(self,{'win_id':win.id,'motor':'blind','pos':motor.position_max,'angle':motor.angle_min}) )
+            #return { 'result': 0, 'room_state': self.getState('window_state',{'win_id':None}) }
+            return self.doRequest('window/state',{'win_id':None})
         if 'window/state' == action:
             win_id = args['win_id']
             if win_id is None:
@@ -852,7 +898,7 @@ class Room:
                 return data
             else:
                 window = self.windows[args['win_id']]
-                return { 'result': 0, 'win_config': window.getState() }
+                return { 'result': 0, 'win_config': window.getState('window_state') }
         return { 'result': 1, 'error': 'unknown request '+str(action) }
 
         
@@ -1020,6 +1066,8 @@ class RequestHandler(BaseHTTPRequestHandler):
             ( content, contentType ) = self.handleRequestRequest(path,{'win_id':None})
         elif '/request/window/state.json' == path:
             ( content, contentType ) = self.handleRequestRequest(path,{'win_id':None})
+        elif '/request/room/action.json' == path:
+            ( content, contentType ) = self.handleRequestRequest(path,{'action':MANDATORY})
         elif '/request/sr_state.json' == path:
             ( content, contentType ) = self.handleRequestRequest(path)
         elif '/request/sr/action.json' == path:

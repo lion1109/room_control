@@ -59,8 +59,8 @@ room:
     count:         6
 
   window_0:
-    id:             L1
-    name:           "links 1 (1. von vorne)"
+    id:             R1
+    name:           "rechts 1 (Straßenseite, 1. u. 2. vom blauen Raum Richtung Schlagzeug)"
     opener:
       on_bit:  0
       dir_bit: 1
@@ -69,8 +69,8 @@ room:
       dir_bit: 3
 
   window_1:
-    id:             L2
-    name:           "links 2 (2. von vorne)"
+    id:             R2
+    name:           "rechts 2 (Straßenseite, 3. vom blauen Raum Richtung Schlagzeug)"
     opener:
       on_bit:  4
       dir_bit: 5
@@ -79,8 +79,8 @@ room:
       dir_bit: 7
       
   window_2:
-    id:             L3
-    name:           "links 3 (3. von vorne)"
+    id:             R3
+    name:           "rechts 3 (Straßenseite, 4. vom blauen Raum Richtung Schlagzeug)"
     opener:
       on_bit:   8
       dir_bit:  9
@@ -89,8 +89,8 @@ room:
       dir_bit: 11
       
   window_3:
-    id:             L4
-    name:           "links hinten (4. und 5. von vorne)"
+    id:             R4
+    name:           "rechts 4 (Straßenseite, am Schlagzeug)"
     opener:
       on_bit:  12
       dir_bit: 13
@@ -99,8 +99,8 @@ room:
       dir_bit: 15
 
   window_4:
-    id:             R1
-    name:           "rechts vorne (1. und 2. von vorne)"
+    id:             L1
+    name:           "Links 1 (Hofseite, 2 Fenster vor dem WC)"
     opener:
       on_bit:  16
       dir_bit: 17
@@ -109,8 +109,8 @@ room:
       dir_bit: 19
     
   window_5:
-    id:             R4
-    name:           "rechts hinten (3. und 4. von vorne)"
+    id:             L2
+    name:           "links 2 (Hofseite, 2 Fenster vor dem Eingang)"
     opener:
       on_bit:  20
       dir_bit: 21
