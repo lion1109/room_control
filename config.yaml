@@ -22,14 +22,16 @@ room:
     pinENABLE: 15      # pin 15 = GPIO22
     bits:      48      # number of bits in the shift register, default is 16
 
+    reverseBitOrder: False # if True the last bit is shifted into the register first, default is False 
+
     # Signal level to output a 0 or a 1:
     enabledLevel: HIGH # level of enable pin if enabled HIGH or LOW, default is HIGH
     dataLevel:    HIGH # level of data pin for a 1, HIGH or LOW, default is HIGH
 
     # Signal timing: negative value means no no time to wait, positive float values mean time to wait in seconds 
-    setupTime:      -1 # time need to set up the data signal before clock rising edge, default -1
-    holdTime:       -1 # time need to hold the data signal after clock rising edge, default -1
-    clockTime:      -1 # time need between two shifts, default -1
+    setupTime:       0 # time need to set up the data signal before clock rising edge, default 0
+    holdTime:        0 # time need to hold the data signal after clock rising edge, default 0
+    clockTime:       0 # time need between two shifts, default 0
 
   defaults:            # defaults for the room window configuration
     opener:            # window opener data
