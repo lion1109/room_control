@@ -185,8 +185,8 @@ class Bitset:
     def set(self,idx,bit=1):
         if not isinstance(idx,int):
             raise ValueError('idx must be a int value')
-        if not isinstance(idx,int) or idx < 0 or idx >= self.bits:
-            raise IndexRangeError('idx out of range error')
+        if idx < 0 or idx >= self.bits:
+            raise IndexError("idx {} is out of range [0,{}] error".format(idx,self.bits))
         self.data[idx] = ( 1 if bit else 0 )
         
 
@@ -372,8 +372,9 @@ class ShiftRegister: # 74HC595
         print( "\n latch\n" )
         GPIO.output(self.pinLATCH, GPIO.LOW)
         self.stLatch = 0
+        idxMax = self.bitset.bits - 1
         for idx in range(0, self.bitset.bits):
-            bitsetIdx = self.bitset.bits - idx if self.reverseBitOrder else idx
+            bitsetIdx = idxMax - idx if self.reverseBitOrder else idx
             self._shiftBit( self.bitset.get(bitsetIdx) )
         GPIO.output(self.pinLATCH, GPIO.HIGH)
         self.stLatch = 1
@@ -1400,7 +1401,7 @@ class CommServer ( ServerBaseClass ):
                 raise ValueError("cert_path not specified for {}".format(bind))
             if cert_path[0] != '/':
                 cert_path = project.base_dir + '/' + cert_path
-            # using a SSLContext
+            print( "using cert_path: '{}'".format(cert_path) )
             context = ssl.create_default_context(purpose=ssl.Purpose.CLIENT_AUTH, cafile=None, capath=None, cadata=None)
             context.load_cert_chain(cert_path)            
             self.socket = context.wrap_socket( self.socket, server_side=True )
