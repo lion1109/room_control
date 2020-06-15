@@ -1,4 +1,40 @@
-#!/usr/bin/python3
+#! /usr/bin/python3
+"""
+room_control software driver control window opener and window blind motors and user interface web service.
+
+The Hardware relays controling the motors are switched by the output of shift registers 74HC595.
+These get connected together as on large shift register where the input is set by the GPIO
+of the Raspberry Pi microcomputer.
+
+The software is
+
+  Common:
+    - class Config gives access to configurated values 
+    - class Bitset to handle data for the shift register
+
+  Motor control:
+    - class ShiftRegister as driver to the 74HC595 hardware via the GPIO
+    - class Motor to handle the status of a window opener or window blind motor
+    - class Window to hanlde all motors of a window 
+    - class RoomEvent
+      - class SR_Event to handle shift register operations bypassing the motor (just for hardware testing) 
+      - class WindowEvent 
+        - class MotorEvent
+          - class SetPositionEvent represents request to set the motors position
+          - class DriveDirectionEvent represents request to drive a motors (manually) to a direction
+    - class Room is a collection of all Windows of a room and handles the RoomEvents in a event loop thread
+
+  Web interface:
+    - class RequestHandler handles a UI request sends the answer and may push RoomEvents to the room
+    - class CommServer threaded HTTPServer handling one ip address and port bound listening socket
+    - class Project abstracts over all configurations for this projects room and web service
+"""
+__no_pydoc__ = []
+#__all__ = ['Config','Bitset']
+__author__ = "Eduard Gode <eduard@gode.de>"
+__date__   = "12 June 2020"
+__credits__ = """Jakob Gode, for the hardware design
+"""
 
 UseThreading = True # Without threading a hanging http request would block the server 
 
@@ -14,29 +50,27 @@ import yaml
 import types
 import re
 import _thread
+import copy
 
 try:
     import RPi.GPIO as GPIO
 except:
-    # Fake implementation of GPIO to allow development on a non RasPi
     print("!!! use simulated RPI.GPIO !!!\n")
     class GPIO:
+        """This is just a fake GPIO class to allow hardware independent development."""
         BOARD = 0
         OUT   = 0
         LOW   = 0
         HIGH  = 1
         def setmode( pin_name_mode ):
             if GPIO.BOARD != pin_name_mode: raise TypeError("illegal pin_name_mode '{}' in GPIO.setmode".format(pin_name_mode))
-            pass
         def setup( pin, pin_mode ):
             if not isinstance(pin,int) or pin < 1 or pin >= 40: raise TypeError("illegal pin value '{}' in GPIO.output".format(pin))
             if GPIO.OUT: raise TypeError("illegal pin_mode '{}' in GPIO.setup".format(pin_mode))
-            pass
         def output( pin, value ):
             if not isinstance(pin,int) or pin < 1 or pin >= 40: raise TypeError("illegal pin value '{}' in GPIO.output".format(pin))
             if GPIO.LOW != value and GPIO.HIGH != value: raise TypeError("illegal output value '{}' in GPIO.output".format(value))
-            print("GPIO.output( {}, {} )".format(pin,value))
-            pass
+            #print("GPIO.output( {}, {} )".format(pin,value))
 
         
 if UseThreading:
@@ -56,30 +90,31 @@ LOG_ERROR    = 1
 LOG_WARN     = 2 
 LOG_DEBUG    = 3 
 LOG_CALL     = 4
-currentLogLevel = LOG_CALL
+currentLogLevel = LOG_DEBUG
 def log(level,msg):
     if level <= currentLogLevel:
-        #rint(msg,file=sys.stderr)
-        print(msg)
-
-
-def printError(args):
-    print(args,file=sys.stderr)
-
+        print(msg,file=sys.stderr)
 
             
 MANDATORY = object()
 
 
 class Config:
-
+    """The Config class gives access to configuration variables"""
+    __pydoc__ = {'__init__','get','subconfig','isExisting'}
+    
     def __init__ (self,dict,defaults=None,name=None):
+        """
+        dict       configuration dict
+        defaults   an optional dict representing default values
+        name       an optional name for use as substructured data
+        """
         self.dict     = dict
         self.defaults = defaults
         self.name     = name
 
         
-    def getFromDict(self,dict,name,default=None):
+    def _getFromDict(self,dict,name,default=None):
         v = dict
         for i in name.split('.'):
             if v is not None:
@@ -93,10 +128,17 @@ class Config:
         return v
 
     
-    def get(self,name,default=None):
+    def get(self,name,default=MANDATORY):
+        """
+        returns the config value specified by name
+        
+        name     is the name of the value
+        default  is an optional value or the MANDATORY object
+                 if default == MANDATORY then a ValueError is raised if no value is configured
+        """
         if self.defaults is not None:
-            default = self.getFromDict(self.defaults, name, default)
-        val = self.getFromDict(self.dict, name, default)
+            default = self._getFromDict(self.defaults, name, default)
+        val = self._getFromDict(self.dict, name, default)
         if val == MANDATORY:
             raise ValueError("config value '{}' is not specified in {} and {} in {}".format(name,self.dict,self.defaults,self.name));
         return val
@@ -105,7 +147,7 @@ class Config:
     def subConfig(self,name,defaults=None):
         dict = self.get(name)
         if defaults is None and self.defaults is not None:
-            defaults = self.getFromDict(self.defaults,name)
+            defaults = self._getFromDict(self.defaults,name)
         c_name  = name if self.name is None else self.name + '.' + name;
         return Config(dict,defaults,c_name)
 
@@ -114,12 +156,20 @@ class Config:
         return self.dict is not None
 
 
+    def __str__(self):
+        return "Config({},{},{})".format(self.name,self.dict,self.defaults)
 
-import copy
 
+    
 class Bitset:
+    """Simple implementation of a set of 0s an 1s"""
+    __pydoc__ = {'__init__','clear','copy','set','get','toByteArray'}
 
+    
     def __init__(self,bits):
+        """
+        bits       number of bits in this bitset
+        """
         self.bits = bits
         self.clear()
 
@@ -149,6 +199,9 @@ class Bitset:
 
     
     def toByteArray(self):
+        """
+        convert bits of this bitset into a byte sequence (ls-bit-first, ls-byte-first)
+        """
         a = []
         byteIdxMax = int((self.bits+7)/8)
         for byteIdx in range(0,byteIdxMax):
@@ -169,21 +222,52 @@ class Bitset:
 
 
     
-class ProjectEncoder(json.JSONEncoder):
-    def default(self, obj):
-        if isinstance(obj, Bitset):
-            return obj.toByteArray()
-        # Let the base class default method raise the TypeError
-        return json.JSONEncoder.default(self, obj)
+class LatchTime:
+
+    def __init__(self):
+        self.time = None
+
+    def setTime(self):
+        self.time = time.time()
 
         
-
+    
 class ShiftRegister: # 74HC595
+    """
+    74HC959 hardware shift register
+
+    pinDATA      is the number of the GPIO output pin connected to the DATA pin.
+    pinCLOCK     is the number of the GPIO output pin connected to the CLOCK pin.
+    pinLATCH     is the number of the GPIO output pin connected to the LATCH pin.
+    pinENABLE    is the number of the GPIO output pin connected to the ENABLE pin.
+
+    enableLevel  'HIGH' or 'LOW', it is the enabled signal voltage level, default: HIGH
+    dataLevel    'HIGH' or 'LOW', it is the '1' data signal voltage level, default: HIGH
+
+    bits         is the number of bits to control, may be more then 8 for sequencelly connected shift registers.
+
+    reverseBitOrder  if True the bits are stuffed into the register starting by the last bit (bits-1)
+
+    setupTime    the minimal time in seconds after data is set before the raising edge of clock.
+    holdTime     the minimal time in seconds for data must be stable after the raising edge of clock.
+    clockTime    the minimal time in seconds between raising two raising clock edges.
+                 It may be 0 if it is less than setupTime + holdTime
+
+    The methods to modify the bits just sets it into an output cache:
+    clearBits()
+    setBit()
+  
+    The latch() method wites all bits into the hardware and raises the hardware latch pin.
+
+    The enable() method hardware latch pin.
+    """
+    __no_pydoc__ = {'_shiftBit'}
 
     outLevel_LOW_HIGH = [ GPIO.LOW, GPIO.HIGH ]
     outLevel_HIGH_LOW = [ GPIO.HIGH, GPIO.LOW ]
     
     def __init__(self,pinDATA,pinCLOCK,pinLATCH,pinENABLE,bits=8,enableLevel='HIGH',dataLevel='HIGH',reverseBitOrder=True,setupTime=0,holdTime=0,clockTime=0):
+        print("ShiftRegister: pinDATA = '{}'".format(pinDATA))
         self.pinDATA   = pinDATA
         self.pinCLOCK  = pinCLOCK
         self.pinLATCH  = pinLATCH
@@ -197,9 +281,9 @@ class ShiftRegister: # 74HC595
         if setupTime < 0: raise ValueError('setupTime must be 0 or positive float')
         if holdTime  < 0: raise ValueError('holdTime must be 0 or positive float')
         if clockTime < 0: raise ValueError('clockTime must be 0 or positive float')
-        self.setupTime   = setupTime
-        self.holdTime    = holdTime
-        self.clockTime   = clockTime
+        self.setupTime = setupTime
+        self.holdTime  = holdTime
+        self.clockTime = 0 if clockTime < setupTime + holdTime else clockTime 
 
         self.reverseBitOrder = reverseBitOrder
         
@@ -212,12 +296,18 @@ class ShiftRegister: # 74HC595
         self.output    = None
         self.lastTime  = time.time()
 
+        self.nextLatchTime = LatchTime()
+
         self.stData    = None
         self.stClock   = None
         self.stLatch   = None
 
         
-    def togglePin(self,pin): # -2 = DATA, -3 = CLOCK, -4 = LATCH
+    def togglePin(self,pin):
+        """
+        toggle DATA, CLOCK or LATCH pin. This is just for hardware testing!
+        pin numbers: -2 = DATA, -3 = CLOCK, -4 = LATCH
+        """
         if   -2 == pin:
             self.stData  = 1 - self.stData
             GPIO.output(self.pinDATA, self.dataLevel[self.stData and 1 or 0])
@@ -229,7 +319,12 @@ class ShiftRegister: # 74HC595
             GPIO.output(self.pinLATCH, self.stLatch and GPIO.HIGH or GPIO.LOW)
 
             
-    def shiftBit(self,bit=0):
+    def _shiftBit(self,bit):
+        """
+        shift a bit into the shift register hardware.
+        bit is 0 or 1.
+        This method handles the clockTime, setupTime and holdTime by busy waiting.
+        """
         if self.clockTime:
             now = time.time()
             dt  = now - self.lastTime
@@ -249,18 +344,22 @@ class ShiftRegister: # 74HC595
 
 
     def clearRegister(self):
+        """
+        clear the hardware register by shifting 'bits' times a 0 bit.
+        bit is 0 or 1.
+        This method handles the clockTime, setupTime and holdTime by busy waiting.
+        """
         for i in range(0,self.bits):
-            self.shiftBit()
+            self._shiftBit(0)
         self.dirty = True
 
 
     def clearBits(self):
+        """
+        set all bits to 0.
+        """
         self.bitset.clear()
         self.dirty = True
-
-
-    def getOutputBit(self,idx):
-        return self.bitset.get(idx)
 
     
     def setBit(self,idx,value=1):
@@ -270,14 +369,17 @@ class ShiftRegister: # 74HC595
         
     def latch(self): # shift all bits into register and latch
         if not self.dirty: return
+        print( "\n latch\n" )
         GPIO.output(self.pinLATCH, GPIO.LOW)
         self.stLatch = 0
         for idx in range(0, self.bitset.bits):
             bitsetIdx = self.bitset.bits - idx if self.reverseBitOrder else idx
-            self.shiftBit( self.bitset.get(bitsetIdx) )
+            self._shiftBit( self.bitset.get(bitsetIdx) )
         GPIO.output(self.pinLATCH, GPIO.HIGH)
         self.stLatch = 1
         #if self.holdTime: time.sleep(self.holdTime) # sleep to assure data latched
+        self.nextLatchTime.setTime()
+        self.nextLatchTime = LatchTime()
         self.dirty = False
         self.output = self.bitset.copy()
 
@@ -285,6 +387,14 @@ class ShiftRegister: # 74HC595
     def enable(self,bit=1):
         self.enabled = bit and 1 or 0
         GPIO.output( self.pinENABLE, self.enableLevel[self.enabled] )
+
+        
+    def getOutputBit(self,idx):
+        """
+        Returns bit idx of last latched data.
+        This is the current hardware output bit state.
+        """
+        return self.bitset.get(idx)
 
         
     def getState(self):
@@ -321,8 +431,8 @@ class Motor:
                 motor = Motor.busy_motors[id]
             except:
                 break
-            #log(LOG_CALL ,'\ncall motor._checkDrive()')
-            print('\ncall motor._checkDrive()')
+            #log(LOG_CALL ,"\ncall motor._checkDrive()".format(motor.id))
+            #print("\ncall motor._checkDrive(): {}".format(motor.id))
             motor._checkDrive()
             
         
@@ -393,6 +503,7 @@ class Motor:
         
         
     def determinePosition(self,dir=None):
+        print( "determinePosition() state: {}".format(self.state) )
         if dir is None:
             if self.hard_pos is None:
                 dir = 1;
@@ -411,14 +522,15 @@ class Motor:
             
 
     def _calcHardPos(self):
-        print( "_calcHardPos() state: {}".format(self.state) )
+        #print( "_calcHardPos() state: {}".format(self.state) )
         if not self.state: return
         
         now = time.time()
         pos_back = self.drive_start_pos_back
         pos      = self.drive_start_pos
-        if self.DIR_FORWARD == self.drive_direction:
-            dt = now - self.drive_start_time
+            
+        dt = now - self.drive_start_time.time
+        if self.DIR_FORWARD == self.drive_direction:    
             s  = dt * self.speed_dir0
             pos_back -= s
             if pos_back < 0:
@@ -426,7 +538,6 @@ class Motor:
                 pos_back = 0
             if pos > self.hard_pos_max: pos = self.hard_pos_max
         elif self.DIR_BACKWARD == self.drive_direction:
-            dt = now - self.drive_start_time
             s  = dt * self.speed_dir1
             pos_back += s
             if pos_back > self.pos_back_max:
@@ -436,31 +547,31 @@ class Motor:
         else:
             raise ValueError("Internal error: direction={}".format(self.drive_direction))
 
-        log(LOG_DEBUG, "_calcHardPos returns: {}, {}".format(pos,pos_back))
+        #log(LOG_DEBUG, "_calcHardPos returns: {}, {}".format(pos,pos_back))
         self.hard_pos      = pos
         self.hard_pos_back = pos_back
 
 
     def _startMotor(self,dir):
-        print("_startMotor(dir={}), bitDir:{}, bitOn:{}".format(dir,self.bitDir,self.bitOn))
+        #print("_startMotor(dir={}), bitDir:{}, bitOn:{}".format(dir,self.bitDir,self.bitOn))
         sr = self.room.shift_register
         sr.setBit(self.bitDir,dir)
         sr.setBit(self.bitOn,1)
-        sr.latch()
+        #sr.latch()
         self._calcHardPos() # calculate when switching the motor, before setting new drive parameter
-        self.drive_start_time     = time.time()
+        self.drive_start_time     = sr.nextLatchTime # time.time()
         self.drive_direction      = dir
         self.drive_start_pos      = self.hard_pos
         self.drive_start_pos_back = self.hard_pos_back
         Motor.busy_motors[self.id] = self
 
-
+        
     def _stopMotor(self):
-        print("_stopMotor({}), {}, {}, {}, {}".format(dir,self.bitDir,self.bitOn, self.hard_pos, self.hard_pos_back))
+        #print("_stopMotor({}), {}, {}, {}, {}".format(dir,self.bitDir,self.bitOn, self.hard_pos, self.hard_pos_back))
         sr = self.room.shift_register
         sr.setBit(self.bitDir,0)
         sr.setBit(self.bitOn,0)
-        sr.latch()
+        #sr.latch()
         self._calcHardPos() # calculate when switching the motor off 
         self.drive_direction      = None
         self.drive_start_pos      = None
@@ -471,14 +582,14 @@ class Motor:
 
 
     def _planDrive(self): # determine direction to drive 
-        log(LOG_DEBUG, "_planDrive() state:{}, dir:{}, to: {},{}".format(self.state,self.drive_direction,self.drive_to_pos,self.drive_to_pos_back) )
+        #print("_planDrive() state:{}, dir:{}, to: {},{}".format(self.state,self.drive_direction,self.drive_to_pos,self.drive_to_pos_back) )
 
         dir = None
         
         # first check position
         if self.drive_to_pos is not None:
             d_pos = self.drive_to_pos - self.hard_pos
-            print("d_pos: {}, d_pos_max = {}".format(d_pos, self.d_pos_max))
+            #print("d_pos: {}, d_pos_max = {}".format(d_pos, self.d_pos_max))
             if abs(d_pos) > self.d_pos_max:
                 return self.DIR_FORWARD if self.hard_pos < self.drive_to_pos else self.DIR_BACKWARD
             else:
@@ -486,7 +597,7 @@ class Motor:
 
         if self.drive_to_pos_back is not None:
             d_pos = self.drive_to_pos_back - self.hard_pos_back
-            print("d_pos: {}, d_pos_max_back = {}".format(d_pos, self.d_pos_back_max))
+            #print("d_pos: {}, d_pos_max_back = {}".format(d_pos, self.d_pos_back_max))
             if abs(d_pos) > self.d_pos_back_max:
                 return self.DIR_BACKWARD if self.hard_pos_back < self.drive_to_pos_back else self.DIR_FORWARD
             else:
@@ -496,8 +607,10 @@ class Motor:
             
 
     def _checkDrive(self):
-        print( "_checkDrive() id: {}, state:{}, dir:{}".format(self.id,self.state,self.drive_direction) )
+        #print("_checkDrive() id: {}, state:{}, dir:{}".format(self.id,self.state,self.drive_direction) )
         if 0 == self.state: return
+        if self.drive_start_time.time is None:
+            print( "not yet latched time for {},{}".format(self.id,self.motorType) )
 
         self._calcHardPos()
 
@@ -512,7 +625,7 @@ class Motor:
                 if self.hard_pos <= self.hard_pos_min and self.hard_pos_back <= 0:
                     dir = self.STOP_MOTOR
             
-        log(LOG_DEBUG, "_checkDrive state:{} dir:{} is:{},{} to:{},{}, new dir:{}".format(self.state, self.drive_direction, self.hard_pos, self.hard_pos_back, self.drive_to_pos, self.drive_to_pos_back, dir))
+        #log(LOG_DEBUG, "_checkDrive state:{} dir:{} is:{},{} to:{},{}, new dir:{}".format(self.state, self.drive_direction, self.hard_pos, self.hard_pos_back, self.drive_to_pos, self.drive_to_pos_back, dir))
 
         if dir is None:
             log(LOG_DEBUG, 'dir=None in _checkDrive')
@@ -521,11 +634,11 @@ class Motor:
         elif dir != self.drive_direction:
             self._startMotor(dir)
         else:
-            log(LOG_DEBUG, 'dir not changed in _checkDrive()')
-
+            #log(LOG_DEBUG, 'dir not changed in _checkDrive()')
+            pass
 
     def _startDrive(self,dir,to_pos,to_pos_back):
-        print("_startDrive({}, {}, {})".format(dir,to_pos,to_pos_back))
+        log( LOG_CALL, "_startDrive({}, {}, {})".format(dir,to_pos,to_pos_back))
 
         if self.hard_pos is None:
             self.determinePosition()
@@ -568,7 +681,6 @@ class Motor:
         pos_back = None
         if angle is not None:
             da = self.angle_max - self.angle_min
-            #os_back = (angle - self.angle_min ) / da * self.pos_back_max if da else 0
             pos_back = (angle - self.angle_min ) / da * self.pos_back_max
             if pos_back < 0:                 pos_back = 0
             if pos_back > self.pos_back_max: pos_back = self.pos_back_max
@@ -697,7 +809,7 @@ class SR_Event (RoomEvent):
         else:
             b = sr.getOutputBit(bit)
             sr.setBit(bit, 0 if b else 1 )
-            sr.latch()
+            #sr.latch()
         return { 'result': 0, 'sr_state': sr.getState() }
 
     
@@ -715,6 +827,10 @@ class WindowEvent (RoomEvent):
     
     
 class MotorEvent (WindowEvent):
+    """
+    This is the abstract base class for events handling window motor events.
+    """
+    __pydoc__ = [];
 
     def __init__(self,room,args):
         super().__init__(room,args)
@@ -734,7 +850,11 @@ class MotorEvent (WindowEvent):
 
     
 class SetPositionEvent (MotorEvent):
-
+    """
+    This is a RoomEvent which starts a window motor driving to a specified position.
+    """
+    __pydoc__ = ['__init__'];
+    
     def __init__(self,room,args):
         
         super().__init__(room,args)
@@ -754,15 +874,26 @@ class SetPositionEvent (MotorEvent):
 
 
 class DriveDirectionEvent (MotorEvent):
+    """
+    This is a RoomEvent which starts a window motor driving in a specified direction.
+    """
+    __pydoc__ = ['__init__'];
 
     def __init__(self,room,args):
-        
+        """
+        room  is the room to 
+        args  is a dictionary specifying
+              dir    '0' = forward (close window,lower blind,close slat), '1' = backward
+              win_id id of window
+              motor  id of motor to drive 'opener' or 'slat' or 'blind'
+              stop   '1' = stop the motor, '0' = start/continue driving
+        """
         super().__init__(room,args)
         self.stop  = ( '1' == args['stop'] )
         if not self.stop:
             self.direction = int(args['dir'])
             if self.direction != 0 and self.direction != 1:
-                raise ValueError('dir {} must be 0 or 1')        
+                raise ValueError('dir {} must be 0 or 1')
 
     def handle(self,room):
         log(LOG_DEBUG, "handle SetPositionEvent()")
@@ -771,8 +902,19 @@ class DriveDirectionEvent (MotorEvent):
 
 
 class Room:
-
+    """
+    An object of this class represents a room whith its windows.
+    """
+    __pydoc__ = ['__init__']
+    
     def __init__(self,config):
+        """
+        config  is a Config object containing:
+          'spin_rate'
+          'shift_register'
+          'defaults'
+          'windows' with 'windows.count', 'windows_0' .. 'windows_N' defaults
+        """
         self.config    = config
         self.spinRate  = self.config.get('spin_rate', 10) # hz
         self.events    = []
@@ -819,7 +961,7 @@ class Room:
             win_config = self.config.subConfig(win_key, defaults)
             if not win_config.isExisting():
                 error = "window '{:}' is not configured".format(win_key)
-                printError( error )
+                log( LOG_ERROR, error )
                 self.initError = ValueError( error )
             else:
                 window = Window(win_config,self)
@@ -827,7 +969,7 @@ class Room:
                 if id in self.windows:
                     raise ValueError( "window id '{:}' is not unique".format(id) )
                 self.windows[id] = window
-
+        self.shift_register.latch()
 
     def popEvent(self):
         self.eventLock.acquire()
@@ -850,8 +992,10 @@ class Room:
         while len(self.events):
             event = self.popEvent()
             if event is None: break
-            print("handle event "+str(event))
+            print("\nhandle event "+str(event))
             event.handle(self)
+        if self.shift_register.dirty:
+            self.shift_register.latch()
 
 
     def getState(self,request,args):
@@ -874,6 +1018,7 @@ class Room:
             window = self.windows[args['win_id']]
             return { 'result': 0, 'win_config': window.getConfig() }
         if 'room/action' == action:
+            room = self
             action = args['action']
             if 'all_close' == action:
                 for win in self.windows.values():
@@ -921,7 +1066,11 @@ class Room:
         logCnt  = 0
         log(LOG_DEBUG,"logDiff: {}".format(logDiff))
         while True:
+            self.eventLock.acquire()
+            if self.shift_register.dirty:
+                self.shift_register.latch()
             Motor.checkBusyMotors()
+            self.eventLock.release()
             self.handleEvents()
             logCnt += logDiff
             if logCnt > 1: logCnt = 0; print('room thread events: '+str(self.events));
@@ -975,10 +1124,27 @@ def handleContentSVG(content): # replace <use href="#templID" ...> by content of
 
                               
     
+class JSONEncoder(json.JSONEncoder):
+    """
+    JSONEncoder to handle custom data classes.
+    """
+    __pydoc__ = []
+    
+    def default(self, obj):
+        if isinstance(obj, Bitset):
+            return obj.toByteArray()
+        # Let the base class default method raise the TypeError
+        return json.JSONEncoder.default(self, obj)
+
+        
+
 class RequestHandler(BaseHTTPRequestHandler):
+    """
+    This class handles the web requests.
+    """
+    __pydoc__ = [ 'server_version' ]
 
-
-    server_version = 'Room-Control/0.0.1'
+    server_version = 'Room-Control/0.0.2'
                    
     def get_parsed_path(self):
         try:
@@ -1053,7 +1219,7 @@ class RequestHandler(BaseHTTPRequestHandler):
                 data = project.room.doRequest(req,param)
         except ValueError as err:
             data = { 'result': 1, 'error': str(err) }
-        content = json.dumps(data,cls=ProjectEncoder)
+        content = json.dumps(data,cls=JSONEncoder)
         contentType = 'application/json'
         return ( content, contentType )
 
@@ -1092,7 +1258,7 @@ class RequestHandler(BaseHTTPRequestHandler):
             except ValueError as e:
                 data['result'] = 1
                 data['error' ] = "error: '{}'".format(e)
-            content = json.dumps(data,cls=ProjectEncoder)
+            content = json.dumps(data,cls=JSONEncoder)
             contentType = 'application/json'
         elif '/request/window/action.json' == path:
             room = project.room
@@ -1120,7 +1286,7 @@ class RequestHandler(BaseHTTPRequestHandler):
             except ValueError as e:
                 data['result'] = 1
                 data['error' ] = "error: '{}'".format(e)
-            content = json.dumps(data,cls=ProjectEncoder)
+            content = json.dumps(data,cls=JSONEncoder)
             contentType = 'application/json'
         elif '/request/sr_action.json' == path:
             room = project.room
@@ -1137,7 +1303,7 @@ class RequestHandler(BaseHTTPRequestHandler):
             except ValueError as e:
                 data['result'] = 1
                 data['error' ] = "error: '{}'".format(e)
-            content = json.dumps(data,cls=ProjectEncoder)
+            content = json.dumps(data,cls=JSONEncoder)
             contentType = 'application/json'
         elif '/' == path:
             content = '<html><head><meta http-equiv="Content-Type" content="text/html; charset=utf-8"/><title>Room Control</title></head><body>Room Control</body></html>'
@@ -1159,7 +1325,7 @@ class RequestHandler(BaseHTTPRequestHandler):
             try:
                 file = open(full_path, 'rb')
             except FileNotFoundError as e:
-                printError( str(e) )
+                log( LOG_ERROR, str(e) )
                 status  = 404
                 content = "unknown request: GET '"+self.path+"', '"+str(full_path)+"' is not readable"
             else:
@@ -1201,8 +1367,20 @@ class RequestHandler(BaseHTTPRequestHandler):
 bindPat = re.compile(r'^(tls:)?(.*):(\d+)$' )
 
 class CommServer ( ServerBaseClass ):
-
+    """
+    This class handles the communication with one socket. Multiple CommServer objects may be used to open sockets of different ip addresses, ports and protocols.
+    """
+    __pydoc__ = ['__init__']
+    
     def __init__(self,project,bind):
+        """
+        project  is project object to do communication for
+        bind     is the socket sqpecification to bind to examples:
+                 "tls::443"           to bind to port  443 to all addresses using tls
+                 ":80"                to bind to port   80 to all addresses without tls
+                 "tls:127.0.0.1:8443" to bind to port 8443 to localhost using tsl
+                 ipv6 is not yet implemented
+        """
         self.project = project
         
         #( address, port ) = bind.split(':')
@@ -1236,14 +1414,12 @@ class CommServer ( ServerBaseClass ):
 class Project:
 
     def __init__ (self,config):
-        self.config = config
-
         self.base_dir  = config.get( 'project.directory'         )
         self.domain    = config.get( 'web.domain',   'localhost' )
         self.directory = config.get( 'web.directory','web'       )
         self.cert_path = config.get( 'web.cert_path' )
         self.binds     = config.get( 'web.bind',     'localhost:8080' )
-        
+
         if self.base_dir is None:
             raise ValueError('project.directory is not configured')
         # todo: check base_dir for readable directory
@@ -1253,15 +1429,15 @@ class Project:
 
         self.servers = [ CommServer(self,bind) for bind in self.binds.split(',') ]
 
+        self.room = Room(config.subConfig('room'))
+
         
     def serve_forever(self):
+        _thread.start_new_thread(self.room.serve_forever,())
+
         for server in self.servers[1:]:
             _thread.start_new_thread(server.serve_forever,())
         self.servers[0].serve_forever()
-
-        
-    def set_room(self,room):
-        self.room = room
 
         
     def getConfig(self):
@@ -1296,8 +1472,8 @@ if __name__ == '__main__':
         if len(args) != 2 or ( cmd != 'run' and cmd != 'config' and cmd != 'env' ):
             raise ValueError('invocation arguments')
     except Exception as e:
-        printError( "Illegal arguments: "+str(' '.join(sys.argv[1:]))+"\n" )
-        printError( "call: "+prog+" run path_to_config.yaml" )
+        log( LOG_ERROR, "Illegal arguments: "+str(' '.join(sys.argv[1:]))+"\n" )
+        log( LOG_ERROR, "call: "+prog+" run path_to_config.yaml" )
         sys.exit(-1)
     
     if cmd == 'run':
@@ -1305,24 +1481,58 @@ if __name__ == '__main__':
             config_dict = yaml.load(open(confPath, 'r')) 
             print( "config: "+str(config_dict) )
             config = Config(config_dict)
-            room = Room(config.subConfig('room'))
-            _thread.start_new_thread(room.serve_forever,())
-            server = Project(config)
-            server.set_room(room)
-            
+
+            server = Project(config)          
             try:
                 server.serve_forever()
             except KeyboardInterrupt:
                 pass
         #except Exception as e:
-        #    printError( str(e) )
+        #    log( LOG_ERROR, str(e) )
         #    sys.exit(-1)
-            
-    elif cmd == 'config':
-        config = yaml.load(open(confPath, 'r'))
-        print( "# config: "+str(config) )
-        printEnvVars( None, config )
+        
     elif cmd == 'env':
         config = yaml.load(open(confPath, 'r'))
         print( "# config: "+str(config) )
         printEnvVars( None, config )
+
+else:
+    #print("__name__ = '{}'".format(__qname__))
+    pass
+
+
+if 'pydoc' in sys.modules:
+    def __instrument_pydoc__():
+        # suppress __all__, __dict__, and __weakref__  and handle __pydoc__
+        pydoc = sys.modules['pydoc']
+        o_visiblename = pydoc.visiblename
+        def n_visiblename(name, all=None, obj=None):
+            """Decide whether to show documentation on a variable."""
+            # Certain special names are redundant or internal.
+            print("visiblename('{}',{},{})".format(name,all,str(obj)))
+            if name in {'__all__','__author__','__builtins__','__credits__','__date__',
+                        '__cached__','__doc__','__loader__','__name__','__package__','__spec__','__file__',
+                        '__pydoc__','__no_pydoc__','__instrument_pydoc__','__dict__','__weakref__' }:
+                return False
+            if hasattr(obj, '__pydoc__') and not name in obj.__pydoc__:
+                return False
+            if hasattr(obj, '__no_pydoc__') and name in obj.__no_pydoc__:
+                return False
+            return o_visiblename(name,all,obj)
+        pydoc.visiblename = n_visiblename
+
+        # "class MyClass(builtins.object)" => "class MyClass"
+        TextDoc = pydoc.TextDoc
+        o_docclass = TextDoc.docclass
+        emptyBasesPat = re.compile(r'^(\s*class\s+.+)(\(builtins\.object\))(\s*)') # may contain esc sequences
+        emptyBases = lambda m : m.group(1)+m.group(3)
+        def n_docclass(self, object, name=None, mod=None, *ignored):
+            #bases = object.__bases__
+            #object.__bases__ = None
+            ret = o_docclass(self,object,name,mod,*ignored)
+            #object.__bases__ = bases
+            ret = emptyBasesPat.sub(emptyBases,ret)
+            return ret    
+        TextDoc.docclass = n_docclass
+        
+    __instrument_pydoc__()

@@ -5,7 +5,8 @@ web:
   domain:       room.local    # domainname
   
   # list of ip addresses to bind to, tls: prefix for https, ipv6 enclosed in "[]"
-  bind:         "127.0.1.2:4080,tls:127.0.1.2:4443" # default: "localhost:8080"
+  #ind:         "127.0.1.2:4080,tls:127.0.1.2:4443" # default: "localhost:8080"
+  bind:         "tls::4443" # default: "localhost:8080"
   
   # TLS handling:
   # To handle https requests the cert_path has to be specified.

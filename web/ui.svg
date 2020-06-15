@@ -97,9 +97,19 @@ https://gist.github.com/dragermrb/108158f5a284b5fba806
 
              function Room() {
                this.debug = false;
-	       this.setBusy(false);	     
+	       this.setBusy(false);
              }
 	       
+	     Room.prototype.logOutput = function (text) {
+	       console.log(text);
+	       Room.logText += text.toString()+"; \r\n";  
+	       text = Room.logText;
+               this.debugOutput(text);
+               var node = document.getElementById('log_output');
+	       node.textContent = text;
+	     };
+	     Room.logText = '';  
+	     
 	     Room.prototype.debugOutput = function (text) {
 	       var node = document.getElementById('dbg_output');
 	       node.textContent = text;
@@ -161,6 +171,7 @@ https://gist.github.com/dragermrb/108158f5a284b5fba806
 		   catch (err) { alert( "error onuse: '"+node.dataset.onuse+"', "+err ) }
                  }
 	       }
+	       room.logOutput("Application initialized")
 	     }
 
 
@@ -188,8 +199,8 @@ https://gist.github.com/dragermrb/108158f5a284b5fba806
 		     if ( hdl ) hdl(jsonObj,data);
 		     if ( jsonObj.result )
 	               alert('response: '+text);
-		     else
-		       room.debugOutput( text );
+		   //else
+		   //  room.debugOutput( text );
 		   //} catch(err) {
 		   //  alert(err+'\nresponse: '+text+'\nurl: '+url);
 		   //}
@@ -418,6 +429,8 @@ https://gist.github.com/dragermrb/108158f5a284b5fba806
                //alert('id: '+node.id+', pId: '+pWin.id+', eventId: '+nr+', event: '+event.type);
 
                if ( ( 'mouseout' == event.type || 'touchcancel' == event.type ) && null == P_Window.mouseEvent.data ) return;
+
+               room.logOutput( "Event: "+event.type )
 
                var dt = 200; // time between down and up for a click
 	       if ( 'mousedown' == event.type || 'touchstart' == event.type ) {
@@ -744,6 +757,11 @@ https://gist.github.com/dragermrb/108158f5a284b5fba806
   <g transform="translate(300,-500)">
     <rect class="Text" x="0" y="0" width="45000" height="700"/>
     <text id="dbg_output" class="DbgOut" x="200" y="500">.</text>
+  </g>
+
+  <g transform="translate(300,25400)">
+    <rect class="Text" x="0" y="0" width="45000" height="1700"/>
+    <text id="log_output" class="LogOut" x="200" y="1500">.</text>
   </g>
 
   <g transform="translate(39300,500)">
