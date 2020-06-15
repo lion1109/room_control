@@ -846,6 +846,20 @@ https://gist.github.com/dragermrb/108158f5a284b5fba806
       <rect id="btn_sr_latch" class="Button" x="0" y="0" width="3000" height="1800"/>
       <text class="Button" x="500" y="1400">latch</text>
     </g>
+
+    <g transform="translate(0,7600)">
+      <a xlink:href="..">
+        <rect id="btn_sr_latch" class="Button" x="0" y="0" width="3000" height="1800"/>
+        <text class="Button" x="500" y="1400">back</text>
+      </a>
+    </g>
+    
+    <g transform="translate(0,9500)">
+      <a xlink:href="/">
+        <rect id="btn_sr_latch" class="Button" x="0" y="0" width="3000" height="1800"/>
+        <text class="Button" x="500" y="1400">home</text>
+      </a>
+    </g>
   </g>
 
 
