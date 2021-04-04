@@ -367,14 +367,21 @@ class ShiftRegister: # 74HC595
         self.dirty = True
 
         
+    customBoardWireMap = [ 1, 0, 3, 2, 5, 4, 7, 6 ] # to handle custom board design bug of U2
+    
     def latch(self): # shift all bits into register and latch
         if not self.dirty: return
         print( "\n latch\n" )
         GPIO.output(self.pinLATCH, GPIO.LOW)
         self.stLatch = 0
         idxMax = self.bitset.bits - 1
+        idxMinFirstRegister = idxMax - 7
         for idx in range(0, self.bitset.bits):
-            bitsetIdx = idxMax - idx if self.reverseBitOrder else idx
+            if idx >= idxMinFirstRegister: # workaround wrong design of output wireing of shift register U2 on custom board
+                idxV = self.customBoardWireMap[ idx - idxMinFirstRegister ] + idxMinFirstRegister
+            else:
+                idxV = idx
+            bitsetIdx = idxMax - idxV if self.reverseBitOrder else idxV
             self._shiftBit( self.bitset.get(bitsetIdx) )
         GPIO.output(self.pinLATCH, GPIO.HIGH)
         self.stLatch = 1
